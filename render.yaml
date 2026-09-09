@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: ml-affiliate-ai
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ml-affiliate-ai-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ml-affiliate-ai-redis
+          property: connectionString
+      - key: PORT
+        value: "10000"
+      - key: APP_URL
+        fromService:
+          type: web
+          name: ml-affiliate-ai
+          property: host
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ML_CLIENT_ID
+        sync: false
+      - key: ML_CLIENT_SECRET
+        sync: false
+      - key: ML_REDIRECT_URI
+        sync: false
+  - type: keyvalue
+    name: ml-affiliate-ai-redis
+    plan: free
+    region: frankfurt
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Render services
+
+databases:
+  - name: ml-affiliate-ai-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "17"
