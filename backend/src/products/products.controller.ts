@@ -1,0 +1,1 @@
+import {Controller,Get,Query} from '@nestjs/common';import {ProductHunterService} from './product-hunter.service';@Controller('products')export class ProductsController{constructor(private hunter:ProductHunterService){}@Get('search')search(@Query('q') q:string){return this.hunter.search(q||'');}@Get('top')top(){return this.hunter.top();}}
