@@ -1,1 +1,45 @@
-import {Controller,Get,Post,Query,Req,Res,UnauthorizedException} from '@nestjs/common';import {Response,Request} from 'express';import {MercadoLivreService} from './mercadolivre.service';import {AuthService} from '../auth.service';@Controller('marketplace/mercadolivre')export class MarketplaceController{constructor(private ml:MercadoLivreService,private auth:AuthService){}private async currentUser(req:Request){const a=req.headers.authorization||'';const u=await this.auth.userFromToken(a.startsWith('Bearer ')?a.slice(7):undefined);if(!u)throw new UnauthorizedException('UNAUTHORIZED');return u;}@Get('connect')async connect(@Req() req:Request,@Res() res:Response){const u=await this.currentUser(req);return res.redirect(await this.ml.getAuthorizationUrl(u.id));}@Get('callback')async callback(@Query('code') code:string,@Query('state') state:string){return this.ml.exchangeCode(code,state);}@Get('status')async status(@Req() req:Request){const u=await this.currentUser(req);return this.ml.status(u.id);}@Post('refresh')async refresh(@Req() req:Request){const u=await this.currentUser(req);return this.ml.refresh(u.id);}}
+import { Controller, Get, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Response, Request } from 'express';
+import { MercadoLivreService } from './mercadolivre.service';
+import { AuthService } from '../auth.service';
+
+@Controller('marketplace/mercadolivre')
+export class MarketplaceController {
+  constructor(private ml: MercadoLivreService, private auth: AuthService) {}
+
+  private async currentUser(req: Request) {
+    const a = req.headers.authorization || '';
+    const u = await this.auth.userFromToken(a.startsWith('Bearer ') ? a.slice(7) : undefined);
+    if (!u) throw new UnauthorizedException('UNAUTHORIZED');
+    return u;
+  }
+
+  @Get('connect-url')
+  async connectUrl(@Req() req: Request) {
+    const u = await this.currentUser(req);
+    return { url: await this.ml.getAuthorizationUrl(u.id) };
+  }
+
+  @Get('connect')
+  async connect(@Req() req: Request, @Res() res: Response) {
+    const u = await this.currentUser(req);
+    return res.redirect(await this.ml.getAuthorizationUrl(u.id));
+  }
+
+  @Get('callback')
+  async callback(@Query('code') code: string, @Query('state') state: string) {
+    return this.ml.exchangeCode(code, state);
+  }
+
+  @Get('status')
+  async status(@Req() req: Request) {
+    const u = await this.currentUser(req);
+    return this.ml.status(u.id);
+  }
+
+  @Post('refresh')
+  async refresh(@Req() req: Request) {
+    const u = await this.currentUser(req);
+    return this.ml.refresh(u.id);
+  }
+}
