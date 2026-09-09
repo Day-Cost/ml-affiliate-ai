@@ -1,9 +1,121 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-model User { id String @id @default(uuid()) name String email String @unique passwordHash String status String @default("ACTIVE") timezone String @default("Europe/Madrid") createdAt DateTime @default(now()) updatedAt DateTime @updatedAt marketplaceAccounts MarketplaceAccount[] campaigns Campaign[] sessions Session[] }
-model Session { id String @id @default(uuid()) tokenHash String @unique userId String expiresAt DateTime createdAt DateTime @default(now()) user User @relation(fields:[userId], references:[id], onDelete:Cascade) @@index([userId]) }
-model MarketplaceAccount { id String @id @default(uuid()) userId String marketplace String externalUserId BigInt? siteId String? accessTokenEncrypted String refreshTokenEncrypted String tokenExpiresAt DateTime? scope String? status String @default("CONNECTED") lastSyncAt DateTime? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt user User @relation(fields:[userId], references:[id], onDelete:Cascade) @@unique([userId, marketplace]) }
-model OAuthState { id String @id @default(uuid()) state String @unique codeVerifier String userId String expiresAt DateTime createdAt DateTime @default(now()) @@index([state]) }
-model Product { id String @id @default(uuid()) marketplace String externalProductId String title String categoryId String? categoryName String? price Decimal? @db.Decimal(12,2) originalPrice Decimal? @db.Decimal(12,2) discountPercent Decimal? @db.Decimal(5,2) currency String? @default("BRL") rating Decimal? @db.Decimal(3,2) reviewsCount Int? sellerId BigInt? sellerName String? sellerReputation String? imageUrl String? productUrl String? affiliateUrl String? commissionRate Decimal? @db.Decimal(6,3) estimatedCommission Decimal? @db.Decimal(12,2) availability String? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt scores ProductScore[] @@unique([marketplace, externalProductId]) }
-model ProductScore { id String @id @default(uuid()) productId String score Decimal @db.Decimal(5,2) demand Decimal @db.Decimal(5,2) conversion Decimal @db.Decimal(5,2) commission Decimal @db.Decimal(5,2) discount Decimal @db.Decimal(5,2) quality Decimal @db.Decimal(5,2) competition Decimal @db.Decimal(5,2) trend Decimal @db.Decimal(5,2) content Decimal @db.Decimal(5,2) calculatedAt DateTime @default(now()) product Product @relation(fields:[productId], references:[id], onDelete:Cascade) @@index([productId, calculatedAt]) }
-model Campaign { id String @id @default(uuid()) userId String name String objective String status String @default("WAITING_APPROVAL") budgetDaily Decimal? @db.Decimal(12,2) budgetTotal Decimal? @db.Decimal(12,2) recommendedBudget Decimal? @db.Decimal(12,2) approvedByUser Boolean @default(false) approvedAt DateTime? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt user User @relation(fields:[userId], references:[id], onDelete:Cascade) }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String               @id @default(uuid())
+  name                String
+  email               String               @unique
+  passwordHash        String
+  status              String               @default("ACTIVE")
+  timezone            String               @default("Europe/Madrid")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  marketplaceAccounts MarketplaceAccount[]
+  campaigns           Campaign[]
+  sessions            Session[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model MarketplaceAccount {
+  id                   String   @id @default(uuid())
+  userId               String
+  marketplace          String
+  externalUserId       BigInt?
+  siteId               String?
+  accessTokenEncrypted String
+  refreshTokenEncrypted String
+  tokenExpiresAt       DateTime?
+  scope                String?
+  status               String   @default("CONNECTED")
+  lastSyncAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, marketplace])
+}
+
+model OAuthState {
+  id           String   @id @default(uuid())
+  state        String   @unique
+  codeVerifier String
+  userId       String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  @@index([state])
+}
+
+model Product {
+  id                  String         @id @default(uuid())
+  marketplace         String
+  externalProductId   String
+  title               String
+  categoryId          String?
+  categoryName        String?
+  price               Decimal?       @db.Decimal(12, 2)
+  originalPrice       Decimal?       @db.Decimal(12, 2)
+  discountPercent     Decimal?       @db.Decimal(5, 2)
+  currency            String?        @default("BRL")
+  rating              Decimal?       @db.Decimal(3, 2)
+  reviewsCount        Int?
+  sellerId            BigInt?
+  sellerName          String?
+  sellerReputation    String?
+  imageUrl            String?
+  productUrl          String?
+  affiliateUrl        String?
+  commissionRate      Decimal?       @db.Decimal(6, 3)
+  estimatedCommission Decimal?       @db.Decimal(12, 2)
+  availability        String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  scores              ProductScore[]
+  @@unique([marketplace, externalProductId])
+}
+
+model ProductScore {
+  id           String   @id @default(uuid())
+  productId    String
+  score        Decimal  @db.Decimal(5, 2)
+  demand       Decimal  @db.Decimal(5, 2)
+  conversion   Decimal  @db.Decimal(5, 2)
+  commission   Decimal  @db.Decimal(5, 2)
+  discount     Decimal  @db.Decimal(5, 2)
+  quality      Decimal  @db.Decimal(5, 2)
+  competition  Decimal  @db.Decimal(5, 2)
+  trend        Decimal  @db.Decimal(5, 2)
+  content      Decimal  @db.Decimal(5, 2)
+  calculatedAt DateTime @default(now())
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  @@index([productId, calculatedAt])
+}
+
+model Campaign {
+  id                String   @id @default(uuid())
+  userId            String
+  name              String
+  objective         String
+  status            String   @default("WAITING_APPROVAL")
+  budgetDaily       Decimal? @db.Decimal(12, 2)
+  budgetTotal       Decimal? @db.Decimal(12, 2)
+  recommendedBudget Decimal? @db.Decimal(12, 2)
+  approvedByUser    Boolean  @default(false)
+  approvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
