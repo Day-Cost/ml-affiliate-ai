@@ -1,0 +1,1 @@
+import {Body,Controller,Post} from '@nestjs/common';import {CampaignsService} from './campaigns.service';@Controller('campaigns')export class CampaignsController{constructor(private service:CampaignsService){}@Post()create(@Body() body:any){return this.service.create(body);}}
