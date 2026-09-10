@@ -14,9 +14,10 @@ export class PinterestService {
   private redirectUri() { return this.config.get<string>('PINTEREST_REDIRECT_URI') || `${this.config.get<string>('APP_URL')}/api/v1/marketplace/pinterest/callback`; }
   private clientId() { return this.config.get<string>('PINTEREST_APP_ID') || ''; }
   private clientSecret() { return this.config.get<string>('PINTEREST_CLIENT_SECRET') || ''; }
+  isConfigured() { return !!this.clientId() && !!this.clientSecret(); }
 
   async connectUrl(userId: string) {
-    if (!this.clientId() || !this.clientSecret()) throw new Error('PINTEREST_APP_NOT_CONFIGURED');
+    if (!this.isConfigured()) throw new Error('PINTEREST_APP_NOT_CONFIGURED');
     const state = crypto.randomBytes(24).toString('hex');
     await this.db.oAuthState.create({ data: { state, codeVerifier: crypto.randomBytes(32).toString('base64url'), userId, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
     const url = new URL('https://www.pinterest.com/oauth/');
@@ -42,12 +43,12 @@ export class PinterestService {
       create: { userId: oauth.userId, channel: 'PINTEREST', status: 'CONNECTED', accessTokenEnc: this.cryptoService.encrypt(token.access_token), refreshTokenEnc: token.refresh_token ? this.cryptoService.encrypt(token.refresh_token) : null, tokenExpiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000) : null, scopes: token.scope || this.scopes },
       update: { status: 'CONNECTED', accessTokenEnc: this.cryptoService.encrypt(token.access_token), refreshTokenEnc: token.refresh_token ? this.cryptoService.encrypt(token.refresh_token) : undefined, tokenExpiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000) : null, scopes: token.scope || this.scopes },
     });
-    return { ok: true };
+    return { ok: true, userId: oauth.userId };
   }
 
   async status(userId: string) {
     const c = await this.db.channelConnection.findUnique({ where: { userId_channel: { userId, channel: 'PINTEREST' } } });
-    return { connected: !!c && c.status === 'CONNECTED', status: c?.status || 'NOT_CONNECTED', scopes: c?.scopes || null, tokenExpiresAt: c?.tokenExpiresAt || null };
+    return { configured: this.isConfigured(), connected: !!c && c.status === 'CONNECTED', status: c?.status || 'NOT_CONNECTED', scopes: c?.scopes || null, tokenExpiresAt: c?.tokenExpiresAt || null }; 
   }
 
   private async connection(userId: string) {
