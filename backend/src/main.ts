@@ -22,7 +22,7 @@ async function bootstrap() {
 
   // TikTok URL-prefix verification: return the exact verification value
   // encoded in the requested filename. Query strings are ignored.
-  app.use((req, res, next) => {
+  app.use((req: any, res: any, next: any) => {
     const prefix = '/tiktok-developers-site-verification=';
     if (req.path.startsWith(prefix)) {
       return res.type('text/plain').send(req.path.slice(1));
