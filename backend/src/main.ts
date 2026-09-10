@@ -13,6 +13,7 @@ async function bootstrap() {
       { path: 'store/products/:id', method: RequestMethod.GET },
       { path: 'go/:id', method: RequestMethod.GET },
       { path: 'privacy', method: RequestMethod.GET },
+      { path: 'terms', method: RequestMethod.GET },
       { path: 'robots.txt', method: RequestMethod.GET },
       { path: 'sitemap.xml', method: RequestMethod.GET },
     ],
