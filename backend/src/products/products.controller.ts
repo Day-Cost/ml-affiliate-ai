@@ -15,14 +15,9 @@ export class ProductsController {
   }
 
   @Get('search')
-  async search(@Req() req: Request, @Query('q') q: string) { await this.currentUser(req); return this.hunter.search(q || ''); }
-
+  async search(@Req() req: Request, @Query('q') q: string) { const u = await this.currentUser(req); return this.hunter.search(q || '', u.id); }
   @Get('top')
   async top(@Req() req: Request) { await this.currentUser(req); return this.hunter.top(); }
-
   @Post(':id/affiliate-link')
-  async affiliateLink(@Req() req: Request, @Param('id') id: string, @Body() body: { affiliateUrl: string }) {
-    await this.currentUser(req);
-    return this.hunter.setAffiliateUrl(id, body?.affiliateUrl);
-  }
+  async affiliateLink(@Req() req: Request, @Param('id') id: string, @Body() body: { affiliateUrl: string }) { await this.currentUser(req); return this.hunter.setAffiliateUrl(id, body?.affiliateUrl); }
 }
