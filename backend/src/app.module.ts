@@ -6,11 +6,12 @@ import { MarketplaceModule } from './marketplace/marketplace.module';
 import { ProductsModule } from './products/products.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { ContentModule } from './content/content.module';
 import { HealthController } from './health.controller';
 import { PrismaService } from './prisma.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, ProductsModule, ScoringModule, CampaignsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, ProductsModule, ScoringModule, CampaignsModule, ContentModule],
   controllers: [HealthController],
   providers: [PrismaService, AuthService],
 })
