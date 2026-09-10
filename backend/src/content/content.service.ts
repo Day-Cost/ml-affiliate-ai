@@ -13,6 +13,7 @@ export class ContentService {
     const productId = body.productId ? String(body.productId) : undefined;
     const product = productId ? await this.prisma.product.findUnique({ where: { id: productId } }) : null;
     if (productId && !product) throw new NotFoundException('PRODUCT_NOT_FOUND');
+    if (productId && !product?.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
     const title = product?.title || String(body.title || 'Oferta selecionada pelo ML Affiliate AI');
     const affiliateUrl = product?.affiliateUrl || null;
     const caption = `Confira ${title}. ${product?.discountPercent ? `Desconto de ${product.discountPercent}%. ` : ''}${affiliateUrl ? `Acesse pelo link de afiliado: ${affiliateUrl}` : 'Link de afiliado ainda não vinculado.'}`;
@@ -23,14 +24,15 @@ export class ContentService {
   async approve(userId: string, id: string) {
     const item = await this.prisma.marketingContent.findFirst({ where: { id, userId } });
     if (!item) throw new NotFoundException('CONTENT_NOT_FOUND');
+    if (!item.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
     return this.prisma.marketingContent.update({ where: { id }, data: { approved: true, status: 'APPROVED' } });
   }
 
   async publish(userId: string, id: string) {
     const item = await this.prisma.marketingContent.findFirst({ where: { id, userId } });
     if (!item) throw new NotFoundException('CONTENT_NOT_FOUND');
+    if (!item.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
     if (!item.approved) throw new ForbiddenException('CONTENT_APPROVAL_REQUIRED');
-    if ((item.channel === 'TIKTOK' || item.channel === 'INSTAGRAM' || item.channel === 'PINTEREST') && !item.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
     if (item.channel === 'TIKTOK' || item.channel === 'INSTAGRAM' || item.channel === 'PINTEREST') return { ok: false, status: 'OFFICIAL_API_PUBLISHER_REQUIRED', contentId: id };
     if (item.channel === 'WEB') return this.prisma.marketingContent.update({ where: { id }, data: { status: 'PUBLISHED', publishedAt: new Date(), publishMode: 'AUTO' } });
     return { ok: false, status: 'MANUAL_REQUIRED', contentId: id };
