@@ -31,4 +31,10 @@ export class CampaignsController {
 
   @Post(':id/activate')
   async activate(@Req() req: Request, @Param('id') id: string) { return this.service.activate((await this.user(req)).id, id); }
+
+  @Post(':id/pause')
+  async pause(@Req() req: Request, @Param('id') id: string) { return this.service.requestAction((await this.user(req)).id, id, 'PAUSE_AD'); }
+
+  @Post(':id/delete')
+  async delete(@Req() req: Request, @Param('id') id: string) { return this.service.requestAction((await this.user(req)).id, id, 'DELETE_AD'); }
 }
