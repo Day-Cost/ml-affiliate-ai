@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Get, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { PinterestService } from './pinterest.service';
 
 @Controller('marketplace/pinterest')
@@ -16,7 +16,15 @@ export class PinterestController {
   async connectUrl(@Req() req: Request) { return this.service.connectUrl((await this.user(req)).id); }
 
   @Get('callback')
-  async callback(@Query('code') code: string, @Query('state') state: string) { return this.service.callback(code, state); }
+  async callback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
+    try {
+      await this.service.callback(code, state);
+      return res.redirect('/?pinterest=connected');
+    } catch (error: any) {
+      const reason = encodeURIComponent(String(error?.message || 'PINTEREST_CONNECTION_FAILED').slice(0, 180));
+      return res.redirect(`/?pinterest=error&reason=${reason}`);
+    }
+  }
 
   @Get('status')
   async status(@Req() req: Request) { return this.service.status((await this.user(req)).id); }
