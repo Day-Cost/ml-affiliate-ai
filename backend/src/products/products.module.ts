@@ -9,5 +9,6 @@ import { AuthModule } from '../auth.module';
   imports: [ScoringModule, AuthModule],
   controllers: [ProductsController],
   providers: [ProductHunterService, PrismaService],
+  exports: [ProductHunterService],
 })
 export class ProductsModule {}
