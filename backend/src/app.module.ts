@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { MarketplaceModule } from './marketplace/marketplace.module';
 import { PinterestModule } from './marketplace/pinterest.module';
 import { TikTokModule } from './marketplace/tiktok.module';
+import { InstagramModule } from './marketplace/instagram.module';
 import { ProductsModule } from './products/products.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
@@ -16,7 +17,7 @@ import { HealthController } from './health.controller';
 import { PrismaService } from './prisma.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, PinterestModule, TikTokModule, ProductsModule, ScoringModule, CampaignsModule, ContentModule, FinanceModule, StorefrontModule, AutomationModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, PinterestModule, TikTokModule, InstagramModule, ProductsModule, ScoringModule, CampaignsModule, ContentModule, FinanceModule, StorefrontModule, AutomationModule],
   controllers: [HealthController],
   providers: [PrismaService, AuthService],
 })
