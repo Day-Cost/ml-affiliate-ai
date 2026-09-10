@@ -21,5 +21,8 @@ export class ProductsController {
   @Get('affiliate-pending')
   async affiliatePending(@Req() req: Request) { await this.currentUser(req); return this.hunter.pendingAffiliateLinks(); }
   @Post(':id/affiliate-link')
-  async affiliateLink(@Req() req: Request, @Param('id') id: string, @Body() body: { affiliateUrl: string }) { await this.currentUser(req); return this.hunter.setAffiliateUrl(id, body?.affiliateUrl); }
+  async affiliateLink(@Req() req: Request, @Param('id') id: string, @Body() body: { affiliateUrl: string }) {
+    const u = await this.currentUser(req);
+    return this.hunter.setAffiliateUrl(id, body?.affiliateUrl, u.id);
+  }
 }
