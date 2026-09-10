@@ -49,6 +49,12 @@ services:
         sync: false
       - key: META_REDIRECT_URI
         sync: false
+      - key: PINTEREST_APP_ID
+        sync: false
+      - key: PINTEREST_CLIENT_SECRET
+        sync: false
+      - key: PINTEREST_REDIRECT_URI
+        sync: false
   - type: keyvalue
     name: ml-affiliate-ai-redis
     plan: free
