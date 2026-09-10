@@ -2,31 +2,51 @@ import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/co
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
-import { CryptoService } from '../crypto.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 
 @Injectable()
 export class ProductHunterService {
-  constructor(private prisma: PrismaService, private scoring: ScoringService, private crypto: CryptoService, private mercadoLivre: MercadoLivreService) {}
+  constructor(private prisma: PrismaService, private scoring: ScoringService, private mercadoLivre: MercadoLivreService) {}
 
   async search(query: string, userId?: string) {
     if (!query.trim()) return { query, items: [] };
-    if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
-    let acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
-    if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
-    if (acc.tokenExpiresAt && acc.tokenExpiresAt.getTime() < Date.now() + 60000) { await this.mercadoLivre.refresh(userId); acc = await this.prisma.marketplaceAccount.findUnique({ where: { id: acc.id } }); }
-    let token = this.crypto.decrypt(acc!.accessTokenEncrypted);
-    const request = async (t: string) => axios.get('https://api.mercadolibre.com/sites/MLB/search', { params: { q: query.trim(), status: 'active', limit: 20 }, headers: { Authorization: `Bearer ${t}`, Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' }, timeout: 15000 });
+
+    // Product discovery uses Mercado Livre's public catalog/search data. OAuth is
+    // still required for affiliate-link release, but it must not block discovery.
+    const request = async () => axios.get('https://api.mercadolibre.com/sites/MLB/search', {
+      params: { q: query.trim(), status: 'active', limit: 20 },
+      headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
+      timeout: 15000,
+    });
+
     let data: any;
-    try { data = (await request(token)).data; }
-    catch (error: any) { if (error?.response?.status === 401) { await this.mercadoLivre.refresh(userId); acc = await this.prisma.marketplaceAccount.findUnique({ where: { id: acc!.id } }); token = this.crypto.decrypt(acc!.accessTokenEncrypted); data = (await request(token)).data; } else throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FAILED'); }
+    try {
+      data = (await request()).data;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${status || 'NETWORK'}`);
+    }
 
     const items = await Promise.all((data.results || []).map(async (p: any) => {
       let detail: any = p;
-      try { detail = (await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(p.id)}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' }, timeout: 10000 })).data; } catch {}
+      try {
+        detail = (await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(p.id)}`, {
+          headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
+          timeout: 10000,
+        })).data;
+      } catch {}
+
       let catalog: any = {};
-      if (detail.catalog_product_id) { try { catalog = (await axios.get(`https://api.mercadolibre.com/products/${encodeURIComponent(detail.catalog_product_id)}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' }, timeout: 10000 })).data; } catch {} }
-      const price = Number(detail.price || p.price || 0);
+      if (detail.catalog_product_id) {
+        try {
+          catalog = (await axios.get(`https://api.mercadolibre.com/products/${encodeURIComponent(detail.catalog_product_id)}`, {
+            headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
+            timeout: 10000,
+          })).data;
+        } catch {}
+      }
+
+      const price = Number(detail.price ?? p.price ?? 0);
       const originalPrice = detail.original_price != null ? Number(detail.original_price) : null;
       const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
       const rating = detail.reviews?.rating_average != null ? Number(detail.reviews.rating_average) : null;
@@ -53,9 +73,16 @@ export class ProductHunterService {
     return { query, total: data.paging?.total || items.length, items };
   }
 
-  async searchForConnectedUser(query: string) { const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } }); if (!acc) throw new Error('MERCADO_LIVRE_NOT_CONNECTED'); return this.search(query, acc.userId); }
+  async searchForConnectedUser(query: string) {
+    const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
+    if (!acc) throw new Error('MERCADO_LIVRE_NOT_CONNECTED');
+    return this.search(query, acc.userId);
+  }
 
-  async top() { const products = await this.prisma.product.findMany({ select: { id: true, title: true, price: true, originalPrice: true, discountPercent: true, imageUrl: true, productUrl: true, affiliateUrl: true, updatedAt: true, scores: { select: { score: true, calculatedAt: true }, orderBy: { calculatedAt: 'desc' }, take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 20 }); return products.map(p => ({ id: p.id, title: p.title, price: Number(p.price || 0), originalPrice: p.originalPrice == null ? null : Number(p.originalPrice), discountPercent: Number(p.discountPercent || 0), imageUrl: p.imageUrl, productUrl: p.productUrl, affiliateUrl: p.affiliateUrl, affiliateStatus: p.affiliateUrl ? 'ACTIVE' : 'PENDING', updatedAt: p.updatedAt, latestScore: p.scores[0]?.score ?? null })).sort((a, b) => Number(b.latestScore || 0) - Number(a.latestScore || 0)); }
+  async top() {
+    const products = await this.prisma.product.findMany({ select: { id: true, title: true, price: true, originalPrice: true, discountPercent: true, imageUrl: true, productUrl: true, affiliateUrl: true, updatedAt: true, scores: { select: { score: true, calculatedAt: true }, orderBy: { calculatedAt: 'desc' }, take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 20 });
+    return products.map(p => ({ id: p.id, title: p.title, price: Number(p.price || 0), originalPrice: p.originalPrice == null ? null : Number(p.originalPrice), discountPercent: Number(p.discountPercent || 0), imageUrl: p.imageUrl, productUrl: p.productUrl, affiliateUrl: p.affiliateUrl, affiliateStatus: p.affiliateUrl ? 'ACTIVE' : 'PENDING', updatedAt: p.updatedAt, latestScore: p.scores[0]?.score ?? null })).sort((a, b) => Number(b.latestScore || 0) - Number(a.latestScore || 0));
+  }
 
   async pendingAffiliateLinks() { return this.prisma.product.findMany({ where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null, productUrl: { not: null } }, select: { id: true, externalProductId: true, title: true, price: true, discountPercent: true, imageUrl: true, productUrl: true, categoryId: true, categoryName: true, updatedAt: true }, orderBy: [{ updatedAt: 'desc' }], take: 200 }); }
 
@@ -65,7 +92,6 @@ export class ProductHunterService {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('PRODUCT_NOT_FOUND');
     const updated = await this.prisma.product.update({ where: { id: productId }, data: { affiliateUrl: url } });
-
     if (userId) await this.createMarketingQueue(userId, updated);
     return { ...updated, affiliateStatus: 'ACTIVE', marketing: 'QUEUED', storefront: 'ACTIVE' };
   }
