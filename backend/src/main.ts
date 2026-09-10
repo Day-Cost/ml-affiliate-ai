@@ -19,6 +19,17 @@ async function bootstrap() {
     ],
   });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+  // TikTok URL-prefix verification: return the exact verification value
+  // encoded in the requested filename. Query strings are ignored.
+  app.use((req, res, next) => {
+    const prefix = '/tiktok-developers-site-verification=';
+    if (req.path.startsWith(prefix)) {
+      return res.type('text/plain').send(req.path.slice(1));
+    }
+    next();
+  });
+
   app.use(express.static(path.join(process.cwd(), '../frontend')));
   app.getHttpAdapter().get('/', (_req, res) => res.sendFile(path.join(process.cwd(), '../frontend/index.html')));
   const config = new DocumentBuilder().setTitle('ML Affiliate AI').setVersion('2.0').build();
