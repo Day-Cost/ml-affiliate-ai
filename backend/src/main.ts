@@ -25,7 +25,8 @@ async function bootstrap() {
   app.use((req: any, res: any, next: any) => {
     const prefix = '/tiktok-developers-site-verification=';
     if (req.path.startsWith(prefix)) {
-      return res.type('text/plain').send(req.path.slice(1));
+      const value = req.path.slice(1).replace(/\.txt$/, '');
+      return res.type('text/plain').send(value);
     }
     next();
   });
