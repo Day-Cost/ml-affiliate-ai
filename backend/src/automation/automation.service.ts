@@ -42,15 +42,36 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       const configured = String(process.env.HUNTER_QUERIES || '').split(',').map(q => q.trim()).filter(Boolean);
-      const queries = configured.length ? configured.slice(0, 12) : ['celular','notebook','fone bluetooth','smartwatch','eletrodoméstico','casa inteligente','beleza','fitness','acessórios','cozinha'];
+      // Automotive parts are a dedicated high-priority search family. The Hunter
+      // still accepts HUNTER_QUERIES for custom coverage, while this default set
+      // covers the major parts/subcategories available in Mercado Livre.
+      const queries = configured.length ? configured : [
+        'peças automotivas', 'freios', 'pastilhas de freio', 'discos de freio',
+        'suspensão automotiva', 'amortecedores', 'motor automotivo', 'peças de motor',
+        'embreagem', 'transmissão automotiva', 'direção automotiva', 'injeção eletrônica',
+        'ignição automotiva', 'baterias automotivas', 'elétrica automotiva',
+        'filtros automotivos', 'óleo e lubrificantes automotivos', 'ar condicionado automotivo',
+        'iluminação automotiva', 'faróis e lanternas', 'lataria automotiva',
+        'retrovisores automotivos', 'rodas e pneus', 'acessórios automotivos',
+        'som automotivo', 'segurança automotiva', 'reboque e engate', 'ferramentas automotivas'
+      ];
       const results = [];
+      this.logger.log(`Hunter cycle started: ${queries.length} search families.`);
       for (const query of queries) {
         if (!this.enabled) break;
-        try { const result = await this.hunter.searchForConnectedUser(query); results.push({ query, total: result.total || 0, ok: true }); }
-        catch (error) { this.logger.warn(`Hunter failed for ${query}: ${String(error)}`); results.push({ query, ok: false, reason: String(error).includes('NOT_CONNECTED') ? 'MERCADO_LIVRE_NOT_CONNECTED' : 'SEARCH_FAILED' }); }
+        try {
+          const result = await this.hunter.searchForConnectedUser(query);
+          results.push({ query, total: result.total || 0, ok: true });
+          this.logger.log(`Hunter completed: ${query} (${result.total || 0} catalog results).`);
+        }
+        catch (error) {
+          this.logger.warn(`Hunter failed for ${query}: ${String(error)}`);
+          results.push({ query, ok: false, reason: String(error).includes('NOT_CONNECTED') ? 'MERCADO_LIVRE_NOT_CONNECTED' : 'SEARCH_FAILED' });
+        }
       }
       this.lastRunAt = new Date();
       this.lastResult = { ok: true, queries: results, financialAction: 'NONE', stoppedDuringRun: !this.enabled };
+      this.logger.log(`Hunter cycle finished: ${results.length}/${queries.length} search families processed.`);
       return this.lastResult;
     } finally { this.running = false; }
   }
