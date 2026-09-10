@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
@@ -10,40 +9,25 @@ export class ProductHunterService {
 
   async search(query: string, userId?: string) {
     if (!query.trim()) return { query, items: [] };
-
-    // Product discovery uses Mercado Livre's public catalog/search data. OAuth is
-    // still required for affiliate-link release, but it must not block discovery.
-    const request = async () => axios.get('https://api.mercadolibre.com/sites/MLB/search', {
-      params: { q: query.trim(), status: 'active', limit: 20 },
-      headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
-      timeout: 15000,
-    });
+    if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_USER_REQUIRED');
 
     let data: any;
     try {
-      data = (await request()).data;
+      data = await this.mercadoLivre.searchCatalog(userId, query);
     } catch (error: any) {
       const status = error?.response?.status;
+      if (status === 403) throw new UnauthorizedException('MERCADO_LIVRE_FORBIDDEN_CHECK_APP_SCOPES_OR_RECONNECT');
+      if (status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
       throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${status || 'NETWORK'}`);
     }
 
     const items = await Promise.all((data.results || []).map(async (p: any) => {
       let detail: any = p;
-      try {
-        detail = (await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(p.id)}`, {
-          headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
-          timeout: 10000,
-        })).data;
-      } catch {}
+      try { detail = await this.mercadoLivre.getItem(userId, p.id); } catch {}
 
       let catalog: any = {};
       if (detail.catalog_product_id) {
-        try {
-          catalog = (await axios.get(`https://api.mercadolibre.com/products/${encodeURIComponent(detail.catalog_product_id)}`, {
-            headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
-            timeout: 10000,
-          })).data;
-        } catch {}
+        try { catalog = await this.mercadoLivre.getCatalogProduct(userId, detail.catalog_product_id); } catch {}
       }
 
       const price = Number(detail.price ?? p.price ?? 0);
