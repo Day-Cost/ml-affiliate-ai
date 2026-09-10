@@ -39,4 +39,11 @@ export class CampaignsService {
     if (!campaign.approvedByUser) throw new ForbiddenException('USER_APPROVAL_REQUIRED');
     return { ok: true, campaignId, status: 'APPROVED', financialActionExecuted: false };
   }
+
+  async requestAction(userId: string, campaignId: string, action: 'PAUSE_AD' | 'DELETE_AD') {
+    const campaign = await this.prisma.campaign.findFirst({ where: { id: campaignId, userId } });
+    if (!campaign) throw new NotFoundException('CAMPAIGN_NOT_FOUND');
+    const approval = await this.prisma.approvalRequest.create({ data: { userId, campaignId, action, status: 'PENDING', amount: campaign.budgetDaily || campaign.budgetTotal || undefined, details: JSON.stringify({ campaignId, action }) } });
+    return { requiresApproval: true, approval };
+  }
 }
