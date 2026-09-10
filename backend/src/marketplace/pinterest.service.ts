@@ -83,6 +83,34 @@ export class PinterestService {
   async createBoard(userId: string, name: string, description?: string) { return this.api(userId, '/boards', { method: 'POST', body: JSON.stringify({ name, description }) }); }
   async createImagePin(userId: string, input: { boardId: string; title?: string; description?: string; imageUrl: string; link?: string }) { return this.api(userId, '/pins', { method: 'POST', body: JSON.stringify({ board_id: input.boardId, title: input.title, description: input.description, link: input.link, media_source: { source_type: 'image_url', url: input.imageUrl } }) }); }
 
+  async createVideoPin(userId: string, input: { boardId: string; title?: string; description?: string; videoUrl: string; coverImageUrl: string; link?: string }) {
+    const c = await this.connection(userId);
+    const token = this.cryptoService.decrypt(c.accessTokenEnc!);
+    const register = await fetch('https://api.pinterest.com/v5/media', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ media_type: 'video' }) });
+    if (!register.ok) throw new Error(`PINTEREST_MEDIA_REGISTER_${register.status}:${await register.text()}`);
+    const media: any = await register.json();
+    const video = await fetch(input.videoUrl);
+    if (!video.ok || !video.body) throw new Error(`VIDEO_SOURCE_FETCH_FAILED:${video.status}`);
+    const form = new FormData();
+    for (const [key, value] of Object.entries(media.upload_parameters || {})) form.append(key, String(value));
+    const bytes = await video.arrayBuffer();
+    form.append('file', new Blob([bytes], { type: video.headers.get('content-type') || 'video/mp4' }), 'video.mp4');
+    const upload = await fetch(media.upload_url, { method: 'POST', body: form });
+    if (!upload.ok) throw new Error(`PINTEREST_MEDIA_UPLOAD_${upload.status}:${await upload.text()}`);
+
+    let ready = false;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const details = await fetch(`https://api.pinterest.com/v5/media/${media.media_id}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!details.ok) throw new Error(`PINTEREST_MEDIA_STATUS_${details.status}:${await details.text()}`);
+      const status: any = await details.json();
+      if (status.status === 'succeeded') { ready = true; break; }
+      if (status.status === 'failed') throw new Error('PINTEREST_MEDIA_PROCESSING_FAILED');
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    if (!ready) throw new Error('PINTEREST_MEDIA_PROCESSING_TIMEOUT');
+    return this.api(userId, '/pins', { method: 'POST', body: JSON.stringify({ board_id: input.boardId, title: input.title, description: input.description, link: input.link, media_source: { source_type: 'video_id', media_id: media.media_id, cover_image_url: input.coverImageUrl } }) });
+  }
+
   async currentUser(req: any) {
     const h = req.headers.authorization || '';
     return this.auth.userFromToken(h.startsWith('Bearer ') ? h.slice(7) : undefined);
