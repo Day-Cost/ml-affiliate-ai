@@ -6,6 +6,8 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AutomationService.name);
   private timer?: NodeJS.Timeout;
   private running = false;
+  private lastRunAt: Date | null = null;
+  private lastResult: any = null;
 
   constructor(private hunter: ProductHunterService) {}
 
@@ -19,6 +21,17 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+  }
+
+  status() {
+    return {
+      enabled: true,
+      intervalHours: Math.max(1, Number(process.env.HUNTER_INTERVAL_HOURS || 6)),
+      running: this.running,
+      lastRunAt: this.lastRunAt,
+      lastResult: this.lastResult,
+      financialAction: 'NONE',
+    };
   }
 
   async run() {
@@ -40,7 +53,9 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
           results.push({ query, ok: false });
         }
       }
-      return { ok: true, queries: results, financialAction: 'NONE' };
+      this.lastRunAt = new Date();
+      this.lastResult = { ok: true, queries: results, financialAction: 'NONE' };
+      return this.lastResult;
     } finally {
       this.running = false;
     }
