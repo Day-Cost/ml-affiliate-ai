@@ -9,11 +9,13 @@ import { ScoringModule } from './scoring/scoring.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { ContentModule } from './content/content.module';
 import { FinanceModule } from './finance/finance.module';
+import { StorefrontModule } from './storefront/storefront.module';
+import { AutomationModule } from './automation/automation.module';
 import { HealthController } from './health.controller';
 import { PrismaService } from './prisma.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, PinterestModule, ProductsModule, ScoringModule, CampaignsModule, ContentModule, FinanceModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, MarketplaceModule, PinterestModule, ProductsModule, ScoringModule, CampaignsModule, ContentModule, FinanceModule, StorefrontModule, AutomationModule],
   controllers: [HealthController],
   providers: [PrismaService, AuthService],
 })
