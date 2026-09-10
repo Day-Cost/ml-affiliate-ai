@@ -15,31 +15,23 @@ export class MarketplaceController {
   }
 
   @Get('connect-url')
-  async connectUrl(@Req() req: Request) {
-    const u = await this.currentUser(req);
-    return { url: await this.ml.getAuthorizationUrl(u.id) };
-  }
+  async connectUrl(@Req() req: Request) { return { url: await this.ml.getAuthorizationUrl((await this.currentUser(req)).id) }; }
 
   @Get('connect')
-  async connect(@Req() req: Request, @Res() res: Response) {
-    const u = await this.currentUser(req);
-    return res.redirect(await this.ml.getAuthorizationUrl(u.id));
-  }
+  async connect(@Req() req: Request, @Res() res: Response) { return res.redirect(await this.ml.getAuthorizationUrl((await this.currentUser(req)).id)); }
 
   @Get('callback')
-  async callback(@Query('code') code: string, @Query('state') state: string) {
-    return this.ml.exchangeCode(code, state);
-  }
+  async callback(@Query('code') code: string, @Query('state') state: string) { return this.ml.exchangeCode(code, state); }
 
   @Get('status')
-  async status(@Req() req: Request) {
-    const u = await this.currentUser(req);
-    return this.ml.status(u.id);
-  }
+  async status(@Req() req: Request) { return this.ml.status((await this.currentUser(req)).id); }
+
+  @Get('account')
+  async account(@Req() req: Request) { return this.ml.account((await this.currentUser(req)).id); }
+
+  @Post('sync')
+  async sync(@Req() req: Request) { return this.ml.account((await this.currentUser(req)).id); }
 
   @Post('refresh')
-  async refresh(@Req() req: Request) {
-    const u = await this.currentUser(req);
-    return this.ml.refresh(u.id);
-  }
+  async refresh(@Req() req: Request) { return this.ml.refresh((await this.currentUser(req)).id); }
 }
