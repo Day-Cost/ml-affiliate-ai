@@ -6,7 +6,6 @@ import { AuthService } from '../auth.service';
 @Controller('automation')
 export class AutomationController {
   constructor(private service: AutomationService, private auth: AuthService) {}
-
   private async check(req: Request) {
     const key = process.env.AUTOMATION_KEY || '';
     if (key && req.headers['x-automation-key'] === key) return;
@@ -14,16 +13,8 @@ export class AutomationController {
     const user = await this.auth.userFromToken(h.startsWith('Bearer ') ? h.slice(7) : undefined);
     if (!user) throw new UnauthorizedException('UNAUTHORIZED');
   }
-
-  @Get('status')
-  async status(@Req() req: Request) {
-    await this.check(req);
-    return this.service.status();
-  }
-
-  @Post('run')
-  async run(@Req() req: Request) {
-    await this.check(req);
-    return this.service.run();
-  }
+  @Get('status') async status(@Req() req: Request) { await this.check(req); return this.service.status(); }
+  @Post('start') async start(@Req() req: Request) { await this.check(req); return this.service.start(); }
+  @Post('stop') async stop(@Req() req: Request) { await this.check(req); return this.service.stop(); }
+  @Post('run') async run(@Req() req: Request) { await this.check(req); return this.service.run(); }
 }
