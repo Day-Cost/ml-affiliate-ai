@@ -13,9 +13,18 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
   constructor(private hunter: ProductHunterService) {}
 
   private hours() { return Math.max(1, Number(process.env.HUNTER_INTERVAL_HOURS || 6)); }
+  private autoStart() { return String(process.env.HUNTER_AUTOSTART || 'false').toLowerCase() === 'true'; }
   private schedule() { if (this.timer) clearInterval(this.timer); this.timer = setInterval(() => void this.run(), this.hours() * 60 * 60 * 1000); }
 
-  onModuleInit() { this.logger.log('Automation loaded OFF. Operator must press START.'); }
+  onModuleInit() {
+    this.logger.log(`Automation loaded ${this.autoStart() ? 'AUTO-START ENABLED' : 'OFF'}.`);
+    if (this.autoStart()) {
+      this.enabled = true;
+      this.schedule();
+      this.logger.log('Product Hunter automation AUTO-STARTED after service initialization.');
+      void this.run();
+    }
+  }
   onModuleDestroy() { this.stop(); }
 
   start() {
@@ -53,13 +62,13 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
         'som automotivo', 'segurança automotiva', 'reboque e engate', 'ferramentas automotivas'
       ];
       const general = configured.length ? configured : ['celular','notebook','fone bluetooth','smartwatch','eletrodoméstico','casa inteligente','beleza','fitness','acessórios','cozinha'];
-      // Automotive parts always have priority; configured/general categories remain covered too.
       const queries = [...new Set([...automotive, ...general])];
       const results = [];
       this.logger.log(`Hunter cycle started: ${queries.length} search families (${automotive.length} automotive + ${general.length} general).`);
       for (const query of queries) {
         if (!this.enabled) break;
         try {
+          this.logger.log(`Hunter searching: ${query}`);
           const result = await this.hunter.searchForConnectedUser(query);
           results.push({ query, total: result.total || 0, ok: true });
           this.logger.log(`Hunter completed: ${query} (${result.total || 0} catalog results).`);
