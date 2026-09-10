@@ -42,10 +42,7 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       const configured = String(process.env.HUNTER_QUERIES || '').split(',').map(q => q.trim()).filter(Boolean);
-      // Automotive parts are a dedicated high-priority search family. The Hunter
-      // still accepts HUNTER_QUERIES for custom coverage, while this default set
-      // covers the major parts/subcategories available in Mercado Livre.
-      const queries = configured.length ? configured : [
+      const automotive = [
         'peças automotivas', 'freios', 'pastilhas de freio', 'discos de freio',
         'suspensão automotiva', 'amortecedores', 'motor automotivo', 'peças de motor',
         'embreagem', 'transmissão automotiva', 'direção automotiva', 'injeção eletrônica',
@@ -55,8 +52,11 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
         'retrovisores automotivos', 'rodas e pneus', 'acessórios automotivos',
         'som automotivo', 'segurança automotiva', 'reboque e engate', 'ferramentas automotivas'
       ];
+      const general = configured.length ? configured : ['celular','notebook','fone bluetooth','smartwatch','eletrodoméstico','casa inteligente','beleza','fitness','acessórios','cozinha'];
+      // Automotive parts always have priority; configured/general categories remain covered too.
+      const queries = [...new Set([...automotive, ...general])];
       const results = [];
-      this.logger.log(`Hunter cycle started: ${queries.length} search families.`);
+      this.logger.log(`Hunter cycle started: ${queries.length} search families (${automotive.length} automotive + ${general.length} general).`);
       for (const query of queries) {
         if (!this.enabled) break;
         try {
