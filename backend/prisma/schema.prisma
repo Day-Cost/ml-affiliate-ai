@@ -20,6 +20,8 @@ model User {
   campaigns           Campaign[]
   sessions            Session[]
   approvals           ApprovalRequest[]
+  contents            MarketingContent[]
+  channelConnections  ChannelConnection[]
 }
 
 model Session {
@@ -85,7 +87,6 @@ model Product {
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   scores               ProductScore[]
-  @@unique([marketplace, externalProductId])
 }
 
 model ProductScore {
@@ -120,6 +121,7 @@ model Campaign {
   updatedAt         DateTime @updatedAt
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   approvals         ApprovalRequest[]
+  contents          MarketingContent[]
 }
 
 model ApprovalRequest {
@@ -132,7 +134,50 @@ model ApprovalRequest {
   details     String?
   requestedAt DateTime  @default(now())
   decidedAt   DateTime?
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   @@index([userId, status])
+}
+
+model MarketingContent {
+  id            String    @id @default(uuid())
+  userId        String
+  campaignId    String?
+  productId     String?
+  channel       String
+  contentType   String
+  title         String?
+  caption       String?
+  script        String?
+  mediaUrl      String?
+  affiliateUrl  String?
+  status        String    @default("DRAFT")
+  publishMode   String    @default("MANUAL")
+  aiGenerated   Boolean   @default(false)
+  approved      Boolean   @default(false)
+  scheduledAt   DateTime?
+  publishedAt   DateTime?
+  externalId    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign      Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  @@index([userId, channel, status])
+}
+
+model ChannelConnection {
+  id              String   @id @default(uuid())
+  userId          String
+  channel         String
+  status          String   @default("NOT_CONNECTED")
+  externalUserId  String?
+  accessTokenEnc  String?
+  refreshTokenEnc String?
+  scopes          String?
+  tokenExpiresAt  DateTime?
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, channel])
 }
