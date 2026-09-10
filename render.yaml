@@ -37,6 +37,18 @@ services:
         sync: false
       - key: ML_REDIRECT_URI
         sync: false
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
+        sync: false
+      - key: TIKTOK_REDIRECT_URI
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_REDIRECT_URI
+        sync: false
   - type: keyvalue
     name: ml-affiliate-ai-redis
     plan: free
