@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Conectar Pinterest — ML Affiliate AI</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="wrap" style="max-width:720px;margin:40px auto">
+  <div class="card">
+    <h1>Conectar Pinterest</h1>
+    <p class="muted">Conexão oficial OAuth. Nenhuma senha do Pinterest é armazenada pelo sistema.</p>
+    <div id="status">Verificando configuração...</div>
+    <div id="error" class="error" style="margin-top:12px"></div>
+    <button id="connect" class="btn" style="margin-top:16px" disabled>Conectar Pinterest</button>
+    <a class="btn alt" style="margin-top:16px" href="/">Voltar ao painel</a>
+  </div>
+</main>
+<script>
+const API='/api/v1';
+const token=localStorage.getItem('mlai_token');
+const statusBox=document.getElementById('status');
+const errorBox=document.getElementById('error');
+const button=document.getElementById('connect');
+async function api(path,opts={}){
+  opts.headers={...(opts.headers||{}),'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})};
+  const r=await fetch(API+path,opts);
+  if(!r.ok) throw new Error((await r.text())||r.statusText);
+  return r.json();
+}
+async function load(){
+  if(!token){statusBox.textContent='Você precisa entrar no painel antes de conectar o Pinterest.';return;}
+  try{
+    const s=await api('/marketplace/pinterest/status');
+    if(s.connected){statusBox.innerHTML='<strong>Pinterest já está conectado.</strong><p class="muted">A integração oficial está ativa.</p>';button.disabled=true;return;}
+    if(!s.configured){statusBox.innerHTML='<strong>Configuração pendente.</strong><p class="muted">O código já está preparado, mas o App ID e o App Secret oficiais do Pinterest ainda precisam ser cadastrados no Render.</p>';return;}
+    statusBox.innerHTML='<strong>Aplicação Pinterest configurada.</strong><p class="muted">Clique abaixo para autorizar sua conta.</p>';
+    button.disabled=false;
+  }catch(e){errorBox.textContent='Não foi possível verificar a conexão: '+e.message;}
+}
+button.onclick=async()=>{
+  button.disabled=true;errorBox.textContent='';statusBox.textContent='Abrindo autorização oficial do Pinterest...';
+  try{const d=await api('/marketplace/pinterest/connect-url');location.href=d.url;}
+  catch(e){button.disabled=false;errorBox.textContent='Não foi possível iniciar: '+e.message;statusBox.textContent='Verifique se o App ID e o App Secret do Pinterest estão configurados no Render.';}
+};
+load();
+</script>
+</body>
+</html>
