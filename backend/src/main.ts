@@ -16,12 +16,11 @@ async function bootstrap() {
       { path: 'terms', method: RequestMethod.GET },
       { path: 'robots.txt', method: RequestMethod.GET },
       { path: 'sitemap.xml', method: RequestMethod.GET },
+      { path: 'media/test/tiktok.mp4', method: RequestMethod.GET },
     ],
   });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
-  // TikTok URL-prefix verification: return the exact verification value
-  // encoded in the requested filename. Query strings are ignored.
   app.use((req: any, res: any, next: any) => {
     const prefix = '/tiktok-developers-site-verification=';
     if (req.path.startsWith(prefix)) {
