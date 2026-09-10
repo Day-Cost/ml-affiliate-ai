@@ -7,7 +7,6 @@ export class PinterestController {
   constructor(private service: PinterestService) {}
 
   private async user(req: Request) {
-    const h = req.headers.authorization || '';
     const u = await this.service.currentUser(req);
     if (!u) throw new UnauthorizedException('UNAUTHORIZED');
     return u;
@@ -33,4 +32,7 @@ export class PinterestController {
 
   @Post('pins/image')
   async createImagePin(@Req() req: Request, @Body() body: { boardId: string; title?: string; description?: string; imageUrl: string; link?: string }) { return this.service.createImagePin((await this.user(req)).id, body); }
+
+  @Post('pins/video')
+  async createVideoPin(@Req() req: Request, @Body() body: { boardId: string; title?: string; description?: string; videoUrl: string; coverImageUrl: string; link?: string }) { return this.service.createVideoPin((await this.user(req)).id, body); }
 }
