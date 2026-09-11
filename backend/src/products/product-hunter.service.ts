@@ -7,6 +7,14 @@ import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 export class ProductHunterService {
   constructor(private prisma: PrismaService, private scoring: ScoringService, private mercadoLivre: MercadoLivreService) {}
 
+  async isReadyForAutomation() {
+    const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
+    if (!acc) return { ready: false, reason: 'MERCADO_LIVRE_NOT_CONNECTED' };
+    const scope = String(acc.scope || '').split(/\s+/).filter(Boolean);
+    if (!scope.includes('read')) return { ready: false, reason: 'MERCADO_LIVRE_READ_SCOPE_REQUIRED' };
+    return { ready: true, userId: acc.userId };
+  }
+
   async search(query: string, userId?: string) {
     if (!query.trim()) return { query, items: [] };
     if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_USER_REQUIRED');
@@ -25,12 +33,10 @@ export class ProductHunterService {
     const items = await Promise.all((data.results || []).map(async (p: any) => {
       let detail: any = p;
       try { detail = await this.mercadoLivre.getItem(userId, p.id); } catch {}
-
       let catalog: any = {};
       if (detail.catalog_product_id) {
         try { catalog = await this.mercadoLivre.getCatalogProduct(userId, detail.catalog_product_id); } catch {}
       }
-
       const price = Number(detail.price ?? p.price ?? 0);
       const originalPrice = detail.original_price != null ? Number(detail.original_price) : null;
       const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
@@ -60,9 +66,9 @@ export class ProductHunterService {
   }
 
   async searchForConnectedUser(query: string) {
-    const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
-    if (!acc) throw new Error('MERCADO_LIVRE_NOT_CONNECTED');
-    return this.search(query, acc.userId);
+    const ready = await this.isReadyForAutomation();
+    if (!ready.ready) throw new Error(ready.reason);
+    return this.search(query, ready.userId);
   }
 
   async top() {
