@@ -16,10 +16,24 @@ export class MercadoLivreService {
     const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});
     if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId=acc.siteId||'MLB';
-    // Product Hunter needs real marketplace listings, not catalog PDPs.
-    // The marketplace search returns concrete ITEM ids and permalinks that
-    // can be opened directly by the user and later matched to an affiliate link.
-    const search=await this.getWithToken(userId,`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`,{q:query.trim(),limit:20});
+    // Product Hunter's general keyword search must use the public marketplace
+    // search. The authenticated /sites/{site}/search route is restricted by
+    // Mercado Livre policies for this application and returns 403 for q-based
+    // discovery even when the OAuth account has read/write scopes. We still use
+    // the user's token for protected item/catalog detail calls after discovery.
+    let search:any;
+    try {
+      search=(await axios.get(`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`,{
+        params:{q:query.trim(),limit:20},
+        headers:{Accept:'application/json','User-Agent':'ML-Affiliate-AI/1.0'},
+        timeout:15000
+      })).data;
+    } catch (error:any) {
+      if(error?.response?.status===401 || error?.response?.status===403){
+        throw new UnauthorizedException('MERCADO_LIVRE_PUBLIC_SEARCH_FORBIDDEN');
+      }
+      throw error;
+    }
     const results=(search.results||[]).map((item:any)=>({
       id:item.id,
       title:item.title||'',
