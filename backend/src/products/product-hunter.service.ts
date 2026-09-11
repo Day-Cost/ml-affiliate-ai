@@ -32,11 +32,30 @@ export class ProductHunterService {
     }
 
     const items = await Promise.all((data.results || []).map(async (p: any) => {
-      let detail: any = p;
+      let detail: any = null;
       try { detail = await this.mercadoLivre.getItem(userId, p.id); } catch {}
+
+      // /products/search may return a catalog product ID when there is no
+      // buy-box item in the response. Resolve the real marketplace item through
+      // the official catalog /products/{id}/items resource instead of persisting
+      // the catalog ID as if it were an item ID.
+      if (!detail && p.catalog_product_id) {
+        try {
+          const catalogItems: any = await this.mercadoLivre.getCatalogProductItems(userId, p.catalog_product_id);
+          const rows = Array.isArray(catalogItems?.results) ? catalogItems.results : [];
+          const winner = rows.find((row: any) => row?.winner === true || row?.status === 'winning') || rows[0];
+          const itemId = winner?.item_id || winner?.id || winner?.item?.id;
+          if (itemId) {
+            try { detail = await this.mercadoLivre.getItem(userId, itemId); } catch {}
+          }
+        } catch {}
+      }
+
+      if (!detail) detail = p;
       let catalog: any = {};
-      if (detail.catalog_product_id) {
-        try { catalog = await this.mercadoLivre.getCatalogProduct(userId, detail.catalog_product_id); } catch {}
+      const catalogProductId = detail.catalog_product_id || p.catalog_product_id;
+      if (catalogProductId) {
+        try { catalog = await this.mercadoLivre.getCatalogProduct(userId, catalogProductId); } catch {}
       }
       const price = Number(detail.price ?? p.price ?? 0);
       const originalPrice = detail.original_price != null ? Number(detail.original_price) : null;
@@ -53,7 +72,7 @@ export class ProductHunterService {
       const id = String(detail.id || p.id);
       const categoryId = detail.category_id || catalog.category_id || null;
       const categoryName = detail.domain_name || catalog.domain_name || null;
-      const imageUrl = detail.thumbnail || detail.pictures?.[0]?.url || catalog.pictures?.[0]?.url || null;
+      const imageUrl = detail.thumbnail?.secure_url || detail.thumbnail || detail.pictures?.[0]?.url || catalog.pictures?.[0]?.url || null;
       const productUrl = detail.permalink || p.permalink || catalog.permalink || p.buy_box_winner?.permalink || p.buy_box_winner?.url || null;
       const product = await this.prisma.product.upsert({
         where: { id: `ml-${id}` },
@@ -78,9 +97,6 @@ export class ProductHunterService {
   }
 
   async pendingAffiliateLinks() {
-    // Read every product that still needs an affiliate link first. Older records may
-    // have been stored before the direct permalink fix, so repair their product URL
-    // from the official Mercado Livre item endpoint instead of silently hiding them.
     const candidates = await this.prisma.product.findMany({
       where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null },
       select: { id: true, externalProductId: true, title: true, price: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, categoryId: true, categoryName: true, updatedAt: true },
@@ -94,10 +110,24 @@ export class ProductHunterService {
       if (acc) {
         for (const product of missingUrl) {
           try {
-            const detail: any = await this.mercadoLivre.getItem(acc.userId, product.externalProductId);
+            let detail: any = null;
+            try { detail = await this.mercadoLivre.getItem(acc.userId, product.externalProductId); } catch {}
+
+            // Older rows can contain a catalog product ID instead of an item ID.
+            // Resolve the real item through the official catalog items endpoint.
+            if (!detail) {
+              try {
+                const catalogItems: any = await this.mercadoLivre.getCatalogProductItems(acc.userId, product.externalProductId);
+                const rows = Array.isArray(catalogItems?.results) ? catalogItems.results : [];
+                const winner = rows.find((row: any) => row?.winner === true || row?.status === 'winning') || rows[0];
+                const itemId = winner?.item_id || winner?.id || winner?.item?.id;
+                if (itemId) detail = await this.mercadoLivre.getItem(acc.userId, itemId);
+              } catch {}
+            }
+
             const permalink = detail?.permalink || null;
             if (permalink) {
-              await this.prisma.product.update({ where: { id: product.id }, data: { productUrl: permalink } });
+              await this.prisma.product.update({ where: { id: product.id }, data: { productUrl: permalink, externalProductId: String(detail.id || product.externalProductId) } });
               product.productUrl = permalink;
             }
           } catch (error: any) {
