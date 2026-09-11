@@ -53,7 +53,9 @@ export class ProductHunterService {
       const categoryId = detail.category_id || catalog.category_id || null;
       const categoryName = detail.domain_name || catalog.domain_name || null;
       const imageUrl = detail.thumbnail || detail.pictures?.[0]?.url || catalog.pictures?.[0]?.url || null;
-      const productUrl = detail.permalink || p.permalink || null;
+      // Keep the exact product URL from the item first, then fall back to every
+      // URL already returned by the catalog response. Never fabricate a product URL.
+      const productUrl = detail.permalink || p.permalink || catalog.permalink || p.buy_box_winner?.permalink || p.buy_box_winner?.url || null;
       const product = await this.prisma.product.upsert({
         where: { id: `ml-${id}` },
         create: { id: `ml-${id}`, marketplace: 'MERCADOLIVRE', externalProductId: id, title: String(detail.title || p.title || catalog.name || ''), categoryId, categoryName, price, originalPrice, discountPercent: discount, currency: detail.currency_id || 'BRL', rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : null, sellerName: detail.seller?.nickname || null, imageUrl, productUrl, availability: detail.available_quantity != null ? String(detail.available_quantity) : null },
