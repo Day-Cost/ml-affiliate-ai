@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 
 @Injectable()
 export class ProductHunterService {
+  private readonly logger = new Logger(ProductHunterService.name);
   constructor(private prisma: PrismaService, private scoring: ScoringService, private mercadoLivre: MercadoLivreService) {}
 
   async isReadyForAutomation() {
@@ -53,8 +54,6 @@ export class ProductHunterService {
       const categoryId = detail.category_id || catalog.category_id || null;
       const categoryName = detail.domain_name || catalog.domain_name || null;
       const imageUrl = detail.thumbnail || detail.pictures?.[0]?.url || catalog.pictures?.[0]?.url || null;
-      // Keep the exact product URL from the item first, then fall back to every
-      // URL already returned by the catalog response. Never fabricate a product URL.
       const productUrl = detail.permalink || p.permalink || catalog.permalink || p.buy_box_winner?.permalink || p.buy_box_winner?.url || null;
       const product = await this.prisma.product.upsert({
         where: { id: `ml-${id}` },
@@ -78,7 +77,40 @@ export class ProductHunterService {
     return products.map(p => ({ id: p.id, title: p.title, price: Number(p.price || 0), originalPrice: p.originalPrice == null ? null : Number(p.originalPrice), discountPercent: Number(p.discountPercent || 0), soldQuantity: p.soldQuantity, imageUrl: p.imageUrl, productUrl: p.productUrl, affiliateUrl: p.affiliateUrl, affiliateStatus: p.affiliateUrl ? 'ACTIVE' : 'PENDING', updatedAt: p.updatedAt, latestScore: p.scores[0]?.score ?? null })).sort((a, b) => { const salesA = a.soldQuantity ?? -1; const salesB = b.soldQuantity ?? -1; if (salesA !== salesB) return salesB - salesA; return Number(b.latestScore || 0) - Number(a.latestScore || 0); });
   }
 
-  async pendingAffiliateLinks() { return this.prisma.product.findMany({ where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null, productUrl: { not: null } }, select: { id: true, externalProductId: true, title: true, price: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, categoryId: true, categoryName: true, updatedAt: true }, orderBy: [{ updatedAt: 'desc' }], take: 200 }); }
+  async pendingAffiliateLinks() {
+    // Read every product that still needs an affiliate link first. Older records may
+    // have been stored before the direct permalink fix, so repair their product URL
+    // from the official Mercado Livre item endpoint instead of silently hiding them.
+    const candidates = await this.prisma.product.findMany({
+      where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null },
+      select: { id: true, externalProductId: true, title: true, price: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, categoryId: true, categoryName: true, updatedAt: true },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 200
+    });
+
+    const missingUrl = candidates.filter(p => !p.productUrl);
+    if (missingUrl.length) {
+      const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
+      if (acc) {
+        for (const product of missingUrl) {
+          try {
+            const detail: any = await this.mercadoLivre.getItem(acc.userId, product.externalProductId);
+            const permalink = detail?.permalink || null;
+            if (permalink) {
+              await this.prisma.product.update({ where: { id: product.id }, data: { productUrl: permalink } });
+              product.productUrl = permalink;
+            }
+          } catch (error: any) {
+            this.logger.warn(`Could not repair product URL ${product.externalProductId}: ${error?.message || 'unknown error'}`);
+          }
+        }
+      }
+    }
+
+    const pending = candidates.filter(p => !!p.productUrl);
+    this.logger.log(`Affiliate pending check: ${pending.length} products ready, ${candidates.length - pending.length} still without direct product URL.`);
+    return pending;
+  }
 
   async setAffiliateUrl(productId: string, affiliateUrl: string, userId?: string) {
     const url = String(affiliateUrl || '').trim();
