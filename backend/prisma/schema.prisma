@@ -35,7 +35,7 @@ model Session {
 }
 
 model MarketplaceAccount {
-  id                    String   @id @default(uuid())
+  id                    String   @id
   userId                String
   marketplace            String
   externalUserId        BigInt?
@@ -75,6 +75,7 @@ model Product {
   currency             String?        @default("BRL")
   rating               Decimal?       @db.Decimal(3, 2)
   reviewsCount         Int?
+  soldQuantity         Int?
   sellerId             BigInt?
   sellerName           String?
   sellerReputation     String?
@@ -131,11 +132,11 @@ model ApprovalRequest {
   campaignId  String?
   action      String
   status      String    @default("PENDING")
-  amount      Decimal?  @db.Decimal(12, 2)
+  amount      Decimal? @db.Decimal(12, 2)
   details     String?
   requestedAt DateTime  @default(now())
   decidedAt   DateTime?
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   @@index([userId, status])
 }
