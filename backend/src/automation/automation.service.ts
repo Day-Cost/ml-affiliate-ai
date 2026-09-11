@@ -16,18 +16,26 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
   private autoStart() { return String(process.env.HUNTER_AUTOSTART || 'false').toLowerCase() === 'true'; }
   private schedule() { if (this.timer) clearInterval(this.timer); this.timer = setInterval(() => void this.run(), this.hours() * 60 * 60 * 1000); }
 
-  onModuleInit() {
+  async onModuleInit() {
     this.logger.log(`Automation loaded ${this.autoStart() ? 'AUTO-START ENABLED' : 'OFF'}.`);
-    if (this.autoStart()) {
-      this.enabled = true;
-      this.schedule();
-      this.logger.log('Product Hunter automation AUTO-STARTED after service initialization.');
-      void this.run();
+    if (!this.autoStart()) return;
+    const ready = await this.hunter.isReadyForAutomation();
+    if (!ready.ready) {
+      this.logger.warn(`Automation kept OFF: ${ready.reason}. Connect Mercado Livre with the required read permission before enabling automatic Hunter.`);
+      this.lastResult = { ok: false, reason: ready.reason, financialAction: 'NONE' };
+      return;
     }
+    this.enabled = true;
+    this.schedule();
+    this.logger.log('Product Hunter automation AUTO-STARTED after service initialization.');
+    void this.run();
   }
+
   onModuleDestroy() { this.stop(); }
 
-  start() {
+  async start() {
+    const ready = await this.hunter.isReadyForAutomation();
+    if (!ready.ready) return { ok: false, enabled: false, reason: ready.reason };
     if (this.enabled) return { ok: true, enabled: true, alreadyStarted: true };
     this.enabled = true;
     this.schedule();
@@ -48,18 +56,17 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
   async run() {
     if (!this.enabled) return { ok: false, reason: 'AUTOMATION_STOPPED' };
     if (this.running) return { ok: false, reason: 'RUN_ALREADY_IN_PROGRESS' };
+    const ready = await this.hunter.isReadyForAutomation();
+    if (!ready.ready) {
+      this.stop();
+      this.lastResult = { ok: false, reason: ready.reason, financialAction: 'NONE' };
+      return this.lastResult;
+    }
     this.running = true;
     try {
       const configured = String(process.env.HUNTER_QUERIES || '').split(',').map(q => q.trim()).filter(Boolean);
       const automotive = [
-        'peças automotivas', 'freios', 'pastilhas de freio', 'discos de freio',
-        'suspensão automotiva', 'amortecedores', 'motor automotivo', 'peças de motor',
-        'embreagem', 'transmissão automotiva', 'direção automotiva', 'injeção eletrônica',
-        'ignição automotiva', 'baterias automotivas', 'elétrica automotiva',
-        'filtros automotivos', 'óleo e lubrificantes automotivos', 'ar condicionado automotivo',
-        'iluminação automotiva', 'faróis e lanternas', 'lataria automotiva',
-        'retrovisores automotivos', 'rodas e pneus', 'acessórios automotivos',
-        'som automotivo', 'segurança automotiva', 'reboque e engate', 'ferramentas automotivas'
+        'peças automotivas', 'freios', 'pastilhas de freio', 'discos de freio', 'suspensão automotiva', 'amortecedores', 'motor automotivo', 'peças de motor', 'embreagem', 'transmissão automotiva', 'direção automotiva', 'injeção eletrônica', 'ignição automotiva', 'baterias automotivas', 'elétrica automotiva', 'filtros automotivos', 'óleo e lubrificantes automotivos', 'ar condicionado automotivo', 'iluminação automotiva', 'faróis e lanternas', 'lataria automotiva', 'retrovisores automotivos', 'rodas e pneus', 'acessórios automotivos', 'som automotivo', 'segurança automotiva', 'reboque e engate', 'ferramentas automotivas'
       ];
       const general = configured.length ? configured : ['celular','notebook','fone bluetooth','smartwatch','eletrodoméstico','casa inteligente','beleza','fitness','acessórios','cozinha'];
       const queries = [...new Set([...automotive, ...general])];
@@ -72,10 +79,11 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
           const result = await this.hunter.searchForConnectedUser(query);
           results.push({ query, total: result.total || 0, ok: true });
           this.logger.log(`Hunter completed: ${query} (${result.total || 0} catalog results).`);
-        }
-        catch (error) {
-          this.logger.warn(`Hunter failed for ${query}: ${String(error)}`);
-          results.push({ query, ok: false, reason: String(error).includes('NOT_CONNECTED') ? 'MERCADO_LIVRE_NOT_CONNECTED' : 'SEARCH_FAILED' });
+        } catch (error) {
+          const message = String(error);
+          const reason = message.includes('FORBIDDEN') ? 'MERCADO_LIVRE_SEARCH_FORBIDDEN_REVIEW_APP_PERMISSIONS' : message.includes('NOT_CONNECTED') ? 'MERCADO_LIVRE_NOT_CONNECTED' : 'SEARCH_FAILED';
+          this.logger.warn(`Hunter failed for ${query}: ${message}`);
+          results.push({ query, ok: false, reason });
         }
       }
       this.lastRunAt = new Date();
