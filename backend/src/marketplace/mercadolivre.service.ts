@@ -19,15 +19,15 @@ export class MercadoLivreService {
       ...search,
       results: (search?.results || []).map((item: any) => ({
         id: item.id,
-        title: item.title || '',
-        price: item.price ?? null,
-        currency_id: item.currency_id || null,
+        title: item.title || item.name || '',
+        price: item.price ?? item.buy_box_winner?.price ?? null,
+        currency_id: item.currency_id || item.buy_box_winner?.currency_id || null,
         permalink: item.permalink || null,
         thumbnail: item.thumbnail || item.pictures?.[0]?.url || null,
-        catalog_product_id: item.catalog_product_id || null,
+        catalog_product_id: item.catalog_product_id || item.id || null,
         sold_quantity: item.sold_quantity ?? null,
-        category_id: item.category_id || null,
-        seller_id: item.seller?.id || item.seller_id || null,
+        category_id: item.category_id || item.buy_box_winner?.category_id || null,
+        seller_id: item.seller?.id || item.seller_id || item.buy_box_winner?.seller_id || null,
         item,
       })),
     };
@@ -212,6 +212,46 @@ export class MercadoLivreService {
     ).data;
   }
 
+  private async catalogSearch(siteId: string, query: string, userId: string) {
+    const search = await this.getWithToken(userId, 'https://api.mercadolibre.com/products/search', {
+      status: 'active',
+      site_id: siteId,
+      q: query.trim(),
+      limit: 20,
+    });
+
+    const results = await Promise.all(
+      (search?.results || []).slice(0, 20).map(async (product: any) => {
+        let detail = product;
+        try {
+          detail = await this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(product.id)}`);
+        } catch (error: any) {
+          console.warn(`[MercadoLivre] catalog product detail failed id=${product?.id} status=${error?.response?.status || 'none'}`);
+        }
+
+        const winner = detail?.buy_box_winner;
+        if (!winner?.item_id) {
+          return { ...detail, permalink: detail?.permalink || null };
+        }
+
+        try {
+          const item = await this.getItem(userId, winner.item_id);
+          return item?.permalink
+            ? item
+            : { ...detail, permalink: detail?.permalink || null, buy_box_winner: winner };
+        } catch (error: any) {
+          console.warn(`[MercadoLivre] catalog winner item failed id=${winner.item_id} status=${error?.response?.status || 'none'}`);
+          return { ...detail, permalink: detail?.permalink || null, buy_box_winner: winner };
+        }
+      }),
+    );
+
+    return {
+      ...search,
+      results: results.filter((item: any) => item?.id || item?.permalink),
+    };
+  }
+
   async diagnose(userId: string) {
     const token = await this.access(userId);
     const clientId = this.config.getOrThrow('ML_CLIENT_ID');
@@ -294,52 +334,52 @@ export class MercadoLivreService {
 
     const siteId = acc.siteId || 'MLB';
 
-    // Orus is read-only: when connected, prefer the authenticated Mercado Livre search.
+    // Product Hunter uses the official catalog-search API first. This avoids the
+    // /sites/{site}/search path that is returning 403 for this application/IP.
     try {
-      const search = await this.authenticatedPublicSearch(siteId, query, userId);
+      const search = await this.catalogSearch(siteId, query, userId);
       console.log(
-        `[MercadoLivre] authenticated item search ok query="${query}" results=${Array.isArray(search?.results) ? search.results.length : 0}`,
+        `[MercadoLivre] catalog product search ok query="${query}" results=${Array.isArray(search?.results) ? search.results.length : 0}`,
       );
       return this.normalizeSearch(search);
-    } catch (authError: any) {
-      const authStatus = authError?.response?.status;
+    } catch (catalogError: any) {
+      const catalogStatus = catalogError?.response?.status;
       console.warn(
-        `[MercadoLivre] authenticated item search failed query="${query}" status=${authStatus || 'none'} code=${authError?.code || 'none'} body=${JSON.stringify(authError?.response?.data || {})}`,
+        `[MercadoLivre] catalog product search failed query="${query}" status=${catalogStatus || 'none'} code=${catalogError?.code || 'none'} body=${JSON.stringify(catalogError?.response?.data || {})}`,
       );
 
-      if (authStatus === 401) {
+      if (catalogStatus === 401) {
         throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
       }
 
-      // Public search remains a read-only fallback. It does not require write permissions.
+      // Keep the old listing endpoint as a secondary fallback for accounts where
+      // catalog search is unavailable. No product is accepted unless the API returns it.
       try {
-        const search = await this.publicSearch(siteId, query);
-        console.log(
-          `[MercadoLivre] public item search ok after authenticated failure query="${query}" results=${Array.isArray(search?.results) ? search.results.length : 0}`,
-        );
+        const search = await this.authenticatedPublicSearch(siteId, query, userId);
         return this.normalizeSearch(search);
-      } catch (publicError: any) {
-        const publicStatus = publicError?.response?.status;
-        console.warn(
-          `[MercadoLivre] public item search failed query="${query}" status=${publicStatus || 'none'} code=${publicError?.code || 'none'} body=${JSON.stringify(publicError?.response?.data || {})}`,
-        );
+      } catch (authError: any) {
+        const authStatus = authError?.response?.status;
+        try {
+          const search = await this.publicSearch(siteId, query);
+          return this.normalizeSearch(search);
+        } catch (publicError: any) {
+          const publicStatus = publicError?.response?.status;
+          if (publicStatus === 403 || authStatus === 403 || catalogStatus === 403) {
+            let diagnosis: any = null;
+            try {
+              diagnosis = await this.diagnose(userId);
+            } catch {}
 
-        if (publicStatus === 403 || authStatus === 403) {
-          let diagnosis: any = null;
-          try {
-            diagnosis = await this.diagnose(userId);
-          } catch {}
-
-          if (diagnosis?.hasMercadoPagoScope) {
-            throw new UnauthorizedException('MERCADO_LIVRE_APP_MUST_BE_SEPARATED_FROM_MERCADO_PAGO');
+            if (diagnosis?.hasMercadoPagoScope) {
+              throw new UnauthorizedException('MERCADO_LIVRE_APP_MUST_BE_SEPARATED_FROM_MERCADO_PAGO');
+            }
+            if (diagnosis?.applicationValid === false && diagnosis?.applicationCheckSucceeded === true) {
+              throw new UnauthorizedException('MERCADO_LIVRE_APPLICATION_INACTIVE_OR_INVALID');
+            }
+            throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_FROM_SERVER');
           }
-          if (diagnosis?.applicationValid === false && diagnosis?.applicationCheckSucceeded === true) {
-            throw new UnauthorizedException('MERCADO_LIVRE_APPLICATION_INACTIVE_OR_INVALID');
-          }
-          throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_FROM_SERVER');
+          throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${publicStatus || authStatus || catalogStatus || 'NETWORK'}`);
         }
-
-        throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${publicStatus || authStatus || 'NETWORK'}`);
       }
     }
   }
