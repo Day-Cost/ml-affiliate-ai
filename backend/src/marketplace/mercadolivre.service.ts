@@ -18,11 +18,11 @@ export class MercadoLivreService {
     const siteId=acc.siteId||'MLB';
     const catalog=await this.getWithToken(userId,'https://api.mercadolibre.com/products/search',{status:'active',site_id:siteId,q:query.trim(),limit:20});
     const results=(catalog.results||[]).map((p:any)=>({
-      id:p.buy_box_winner?.item_id||p.id,
+      id:p.buy_box_winner?.item_id||p.buy_box_winner?.id||p.id,
       title:p.name||'',
       price:p.buy_box_winner?.price??null,
       currency_id:p.buy_box_winner?.currency_id||null,
-      permalink:p.buy_box_winner?.permalink||p.permalink||p.buy_box_winner?.url||null,
+      permalink:p.buy_box_winner?.permalink||p.buy_box_winner?.url||p.permalink||null,
       thumbnail:p.pictures?.[0]?.url||p.thumbnail||null,
       catalog_product_id:p.id,
       catalog:p
@@ -31,6 +31,7 @@ export class MercadoLivreService {
   }
   async getItem(userId:string,itemId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
   async getCatalogProduct(userId:string,productId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
+  async getCatalogProductItems(userId:string,productId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`,{limit:20});}
   async account(userId:string){const token=await this.access(userId);const{data}=await axios.get('https://api.mercadolibre.com/users/me',{headers:{Authorization:`Bearer ${token}`,'Accept':'application/json'}});await this.prisma.marketplaceAccount.updateMany({where:{userId,marketplace:'MERCADOLIVRE'},data:{lastSyncAt:new Date(),status:'CONNECTED',siteId:data.site_id||'MLB'}});return{id:data.id,nickname:data.nickname,siteId:data.site_id,countryId:data.country_id,userType:data.user_type,permalink:data.permalink,tags:data.tags||[]};}
   async refresh(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');const refreshToken=this.crypto.decrypt(acc.refreshTokenEncrypted);const payload=new URLSearchParams({grant_type:'refresh_token',client_id:this.config.getOrThrow('ML_CLIENT_ID'),client_secret:this.config.getOrThrow('ML_CLIENT_SECRET'),refresh_token:refreshToken});const{data}=await axios.post('https://api.mercadolibre.com/oauth/token',payload.toString(),{headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}});await this.prisma.marketplaceAccount.update({where:{id:acc.id},data:{accessTokenEncrypted:this.crypto.encrypt(data.access_token),refreshTokenEncrypted:this.crypto.encrypt(data.refresh_token),tokenExpiresAt:new Date(Date.now()+data.expires_in*1000),scope:data.scope,status:'CONNECTED',lastSyncAt:new Date()}});return{refreshed:true,expiresIn:data.expires_in,scope:data.scope,canWrite:String(data.scope||'').split(' ').includes('write')};}
   async status(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});const scope=acc?.scope||'';return{configured:Boolean(this.config.get('ML_CLIENT_ID')&&this.config.get('ML_CLIENT_SECRET')),connected:Boolean(acc),status:acc?'CONNECTED':'NOT_CONNECTED',expiresAt:acc?.tokenExpiresAt||null,lastSyncAt:acc?.lastSyncAt||null,scope,canRead:scope.split(' ').includes('read'),canWrite:scope.split(' ').includes('write'),offlineAccess:scope.split(' ').includes('offline_access'),siteId:acc?.siteId||'MLB'};}
