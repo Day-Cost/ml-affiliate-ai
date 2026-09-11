@@ -22,18 +22,30 @@ export class ProductHunterService {
     try {
       const detail = await this.mercadoLivre.getItem(userId, initialId);
       return { itemId: String(detail.id || initialId), detail, catalog: null };
-    } catch {}
+    } catch (error: any) {
+      // A marketplace search result already contains the real ITEM_ID and permalink.
+      // Do not discard it merely because the secondary /items/{id} request is forbidden.
+      if (candidate?.permalink && candidate?.title) {
+        this.logger.warn(`Using direct marketplace search result for ${initialId}; item detail request failed: ${error?.response?.status || error?.message || 'unknown'}`);
+        return { itemId: initialId, detail: candidate.item || candidate, catalog: null };
+      }
+    }
 
-    const catalogId = String(candidate?.catalog_product_id || candidate?.id || '').trim();
+    const catalogId = String(candidate?.catalog_product_id || '').trim();
     if (!catalogId) return { itemId: null, detail: null, catalog: null };
     try {
-      // The official catalog product resource exposes the real winning
-      // marketplace announcement in buy_box_winner.item_id.
       const catalog = await this.mercadoLivre.getCatalogProduct(userId, catalogId);
       const winnerId = catalog?.buy_box_winner?.item_id;
       if (!winnerId) return { itemId: null, detail: null, catalog };
-      const detail = await this.mercadoLivre.getItem(userId, String(winnerId));
-      return { itemId: String(detail.id || winnerId), detail, catalog };
+      try {
+        const detail = await this.mercadoLivre.getItem(userId, String(winnerId));
+        return { itemId: String(detail.id || winnerId), detail, catalog };
+      } catch (error: any) {
+        if (candidate?.permalink && candidate?.title) {
+          return { itemId: String(winnerId), detail: candidate.item || candidate, catalog };
+        }
+        throw error;
+      }
     } catch (error: any) {
       this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.message || 'unknown error'}`);
       return { itemId: null, detail: null, catalog: null };
@@ -75,19 +87,19 @@ export class ProductHunterService {
       const pictures = catalog.pictures || [];
       const content = Math.min(100, 55 + Math.max(pictures.length, Array.isArray(detail.pictures) ? detail.pictures.length : 0) * 5);
       const score = this.scoring.calculate({ demand, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
-      const id = String(detail.id);
-      const categoryId = detail.category_id || catalog.category_id || null;
+      const id = String(detail.id || p.id);
+      const categoryId = detail.category_id || catalog.category_id || p.category_id || null;
       const categoryName = detail.domain_name || catalog.domain_name || null;
-      const imageUrl = detail.thumbnail?.secure_url || detail.thumbnail || detail.pictures?.[0]?.url || catalog.pictures?.[0]?.url || null;
+      const imageUrl = detail.thumbnail?.secure_url || detail.thumbnail || detail.pictures?.[0]?.url || p.thumbnail || catalog.pictures?.[0]?.url || null;
       const productUrl = detail.permalink || p.permalink || catalog.permalink || null;
-      if (!productUrl) return null;
+      if (!productUrl || !id) return null;
       const product = await this.prisma.product.upsert({
         where: { id: `ml-${id}` },
-        create: { id: `ml-${id}`, marketplace: 'MERCADOLIVRE', externalProductId: id, title: String(detail.title || p.title || catalog.name || ''), categoryId, categoryName, price, originalPrice, discountPercent: discount, currency: detail.currency_id || 'BRL', rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : null, sellerName: detail.seller?.nickname || null, imageUrl, productUrl, availability: detail.available_quantity != null ? String(detail.available_quantity) : null },
-        update: { title: String(detail.title || p.title || catalog.name || ''), categoryId, categoryName, price, originalPrice, discountPercent: discount, currency: detail.currency_id || 'BRL', rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : null, sellerName: detail.seller?.nickname || null, imageUrl, productUrl, availability: detail.available_quantity != null ? String(detail.available_quantity) : null }
+        create: { id: `ml-${id}`, marketplace: 'MERCADOLIVRE', externalProductId: id, title: String(detail.title || p.title || catalog.name || ''), categoryId, categoryName, price, originalPrice, discountPercent: discount, currency: detail.currency_id || p.currency_id || 'BRL', rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : (p.seller_id ? BigInt(p.seller_id) : null), sellerName: detail.seller?.nickname || null, imageUrl, productUrl, availability: detail.available_quantity != null ? String(detail.available_quantity) : null },
+        update: { title: String(detail.title || p.title || catalog.name || ''), categoryId, categoryName, price, originalPrice, discountPercent: discount, currency: detail.currency_id || p.currency_id || 'BRL', rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : (p.seller_id ? BigInt(p.seller_id) : null), sellerName: detail.seller?.nickname || null, imageUrl, productUrl, availability: detail.available_quantity != null ? String(detail.available_quantity) : null }
       });
       await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content } });
-      return { id: detail.id, dbId: product.id, title: detail.title || p.title || catalog.name, price, originalPrice, discountPercent: Number(discount.toFixed(2)), rating, reviewsCount, soldQuantity, thumbnail: imageUrl, permalink: productUrl, affiliateUrl: product.affiliateUrl, score, affiliateStatus: product.affiliateUrl ? 'ACTIVE' : 'PENDING', dataQuality: { demand: soldQuantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: product.affiliateUrl ? 'LINK_READY' : 'LINK_REQUIRED', trend: 'NOT_AVAILABLE', competition: 'ESTIMATE' } };
+      return { id, dbId: product.id, title: detail.title || p.title || catalog.name, price, originalPrice, discountPercent: Number(discount.toFixed(2)), rating, reviewsCount, soldQuantity, thumbnail: imageUrl, permalink: productUrl, affiliateUrl: product.affiliateUrl, score, affiliateStatus: product.affiliateUrl ? 'ACTIVE' : 'PENDING', dataQuality: { demand: soldQuantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: product.affiliateUrl ? 'LINK_READY' : 'LINK_REQUIRED', trend: 'NOT_AVAILABLE', competition: 'ESTIMATE' } };
     }))).filter(Boolean);
     return { query, total: items.length, items };
   }
