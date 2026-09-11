@@ -16,18 +16,24 @@ export class MercadoLivreService {
     const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});
     if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId=acc.siteId||'MLB';
-    const catalog=await this.getWithToken(userId,'https://api.mercadolibre.com/products/search',{status:'active',site_id:siteId,q:query.trim(),limit:20});
-    const results=(catalog.results||[]).map((p:any)=>({
-      id:p.buy_box_winner?.item_id||p.buy_box_winner?.id||p.id,
-      title:p.name||'',
-      price:p.buy_box_winner?.price??null,
-      currency_id:p.buy_box_winner?.currency_id||null,
-      permalink:p.buy_box_winner?.permalink||p.buy_box_winner?.url||p.permalink||null,
-      thumbnail:p.pictures?.[0]?.url||p.thumbnail||null,
-      catalog_product_id:p.id,
-      catalog:p
+    // Product Hunter needs real marketplace listings, not catalog PDPs.
+    // The marketplace search returns concrete ITEM ids and permalinks that
+    // can be opened directly by the user and later matched to an affiliate link.
+    const search=await this.getWithToken(userId,`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`,{q:query.trim(),limit:20});
+    const results=(search.results||[]).map((item:any)=>({
+      id:item.id,
+      title:item.title||'',
+      price:item.price??null,
+      currency_id:item.currency_id||null,
+      permalink:item.permalink||null,
+      thumbnail:item.thumbnail||item.pictures?.[0]?.url||null,
+      catalog_product_id:item.catalog_product_id||null,
+      sold_quantity:item.sold_quantity??null,
+      category_id:item.category_id||null,
+      seller_id:item.seller?.id||item.seller_id||null,
+      item
     }));
-    return {...catalog,results};
+    return {...search,results};
   }
   async getItem(userId:string,itemId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
   async getCatalogProduct(userId:string,productId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
