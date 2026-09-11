@@ -18,21 +18,19 @@ export class MercadoLivreService {
     if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId=acc.siteId||'MLB';
     let search:any;
-    const agent=new https.Agent({keepAlive:false,family:4});
     try {
-      search=(await axios.get(`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`,{
-        params:{q:query.trim(),limit:20},
-        headers:{Accept:'application/json','User-Agent':'ML-Affiliate-AI/1.0'},
-        timeout:15000,
-        httpsAgent:agent,
-        proxy:false
-      })).data;
+      // The marketplace search is executed with the already-authorized OAuth token.
+      // The previous implementation intentionally omitted Authorization and Mercado Livre
+      // now answers those server-side calls with 403. This is a real marketplace listing
+      // search, not the catalog-product search endpoint.
+      search=await this.getWithToken(userId,`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`,{q:query.trim(),limit:20});
+      console.log(`[MercadoLivre] authenticated search ok query="${query}" results=${Array.isArray(search?.results)?search.results.length:0}`);
     } catch (error:any) {
       const status=error?.response?.status;
-      const code=error?.code;
-      const message=error?.message;
-      console.warn(`[MercadoLivre] public search failed query="${query}" status=${status||'none'} code=${code||'none'} message=${message||'unknown'}`);
-      if(status===401 || status===403)throw new UnauthorizedException('MERCADO_LIVRE_PUBLIC_SEARCH_FORBIDDEN');
+      const body=error?.response?.data;
+      console.warn(`[MercadoLivre] authenticated search failed query="${query}" status=${status||'none'} code=${error?.code||'none'} body=${JSON.stringify(body||{})}`);
+      if(status===401) throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_TOKEN_INVALID');
+      if(status===403) throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_CHECK_APP_IP_SCOPES');
       throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FAILED_NETWORK');
     }
     const results=(search.results||[]).map((item:any)=>({id:item.id,title:item.title||'',price:item.price??null,currency_id:item.currency_id||null,permalink:item.permalink||null,thumbnail:item.thumbnail||item.pictures?.[0]?.url||null,catalog_product_id:item.catalog_product_id||null,sold_quantity:item.sold_quantity??null,category_id:item.category_id||null,seller_id:item.seller?.id||item.seller_id||null,item}));
