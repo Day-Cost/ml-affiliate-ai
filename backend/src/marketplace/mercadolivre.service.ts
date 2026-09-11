@@ -11,35 +11,19 @@ export class MercadoLivreService {
   async getAuthorizationUrl(userId:string){const state=randomBytes(24).toString('hex');const verifier=randomBytes(48).toString('base64url');const challenge=createHash('sha256').update(verifier).digest('base64url');await this.prisma.oAuthState.create({data:{state,codeVerifier:verifier,userId,expiresAt:new Date(Date.now()+10*60*1000)}});const p=new URLSearchParams({response_type:'code',client_id:this.config.getOrThrow('ML_CLIENT_ID'),redirect_uri:this.config.getOrThrow('ML_REDIRECT_URI'),state,code_challenge:challenge,code_challenge_method:'S256',scope:'offline_access read write'});return`https://auth.mercadolivre.com.br/authorization?${p.toString()}`;}
   async exchangeCode(code:string,state:string){const oauth=await this.prisma.oAuthState.findUnique({where:{state}});if(!oauth||oauth.expiresAt<new Date())throw new UnauthorizedException('INVALID_OR_EXPIRED_OAUTH_STATE');const payload=new URLSearchParams({grant_type:'authorization_code',client_id:this.config.getOrThrow('ML_CLIENT_ID'),client_secret:this.config.getOrThrow('ML_CLIENT_SECRET'),code,redirect_uri:this.config.getOrThrow('ML_REDIRECT_URI'),code_verifier:oauth.codeVerifier});const{data}=await axios.post('https://api.mercadolibre.com/oauth/token',payload.toString(),{headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}});const me=await axios.get('https://api.mercadolibre.com/users/me',{headers:{Authorization:`Bearer ${data.access_token}`,'Accept':'application/json'}});await this.prisma.marketplaceAccount.upsert({where:{userId_marketplace:{userId:oauth.userId,marketplace:'MERCADOLIVRE'}},create:{userId:oauth.userId,marketplace:'MERCADOLIVRE',externalUserId:BigInt(me.data.id),siteId:me.data.site_id||'MLB',accessTokenEncrypted:this.crypto.encrypt(data.access_token),refreshTokenEncrypted:this.crypto.encrypt(data.refresh_token),tokenExpiresAt:new Date(Date.now()+data.expires_in*1000),scope:data.scope,status:'CONNECTED',lastSyncAt:new Date()},update:{externalUserId:BigInt(me.data.id),siteId:me.data.site_id||'MLB',accessTokenEncrypted:this.crypto.encrypt(data.access_token),refreshTokenEncrypted:this.crypto.encrypt(data.refresh_token),tokenExpiresAt:new Date(Date.now()+data.expires_in*1000),scope:data.scope,status:'CONNECTED',lastSyncAt:new Date()}});await this.prisma.oAuthState.delete({where:{state}});return{connected:true,mercadoLivreUserId:me.data.id,expiresIn:data.expires_in,scope:data.scope,canWrite:String(data.scope||'').split(' ').includes('write')};}
   private async access(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');if(acc.tokenExpiresAt&&acc.tokenExpiresAt.getTime()<Date.now()+60000)await this.refresh(userId);const fresh=await this.prisma.marketplaceAccount.findUnique({where:{id:acc.id}});return this.crypto.decrypt(fresh!.accessTokenEncrypted);}
-  private async getWithToken(userId:string, url:string, params?:Record<string,any>){
-    let token=await this.access(userId);
-    try{return (await axios.get(url,{params,headers:{Authorization:`Bearer ${token}`,'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}
-    catch(error:any){
-      if(error?.response?.status===401){await this.refresh(userId);token=await this.access(userId);return (await axios.get(url,{params,headers:{Authorization:`Bearer ${token}`,'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}
-      throw error;
-    }
-  }
-  private async getPublic(url:string, params?:Record<string,any>){return (await axios.get(url,{params,headers:{'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}
+  private async getWithToken(userId:string, url:string, params?:Record<string,any>){let token=await this.access(userId);try{return(await axios.get(url,{params,headers:{Authorization:`Bearer ${token}`,'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}catch(error:any){if(error?.response?.status===401){await this.refresh(userId);token=await this.access(userId);return(await axios.get(url,{params,headers:{Authorization:`Bearer ${token}`,'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}throw error;}}
   async searchCatalog(userId:string, query:string){
-    // Product discovery uses Mercado Livre's public catalog/search endpoints. The OAuth
-    // connection is still required by the application for account-specific operations,
-    // but a user's API scope must not prevent ordinary public product discovery.
-    return this.getPublic('https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});
+    const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});
+    if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
+    const siteId=acc.siteId||'MLB';
+    // /sites/{site}/search is returning 403 for this integration. Use the
+    // documented authenticated Catalog Product Search instead.
+    const catalog=await this.getWithToken(userId,'https://api.mercadolibre.com/products/search',{status:'active',site_id:siteId,q:query.trim(),limit:20});
+    const results=(catalog.results||[]).map((p:any)=>({id:p.buy_box_winner?.item_id||p.id,title:p.name||'',price:p.buy_box_winner?.price??null,currency_id:p.buy_box_winner?.currency_id||null,permalink:p.buy_box_winner?.permalink||p.permalink||null,thumbnail:p.pictures?.[0]?.url||p.thumbnail||null,catalog_product_id:p.id,catalog:p}));
+    return {...catalog,results};
   }
-  async getItem(userId:string, itemId:string){
-    try{return await this.getPublic(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
-    catch(error:any){
-      if(error?.response?.status===401||error?.response?.status===403)return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);
-      throw error;
-    }
-  }
-  async getCatalogProduct(userId:string, productId:string){
-    try{return await this.getPublic(`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
-    catch(error:any){
-      if(error?.response?.status===401||error?.response?.status===403)return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);
-      throw error;
-    }
-  }
+  async getItem(userId:string,itemId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
+  async getCatalogProduct(userId:string,productId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
   async account(userId:string){const token=await this.access(userId);const{data}=await axios.get('https://api.mercadolibre.com/users/me',{headers:{Authorization:`Bearer ${token}`,'Accept':'application/json'}});await this.prisma.marketplaceAccount.updateMany({where:{userId,marketplace:'MERCADOLIVRE'},data:{lastSyncAt:new Date(),status:'CONNECTED',siteId:data.site_id||'MLB'}});return{id:data.id,nickname:data.nickname,siteId:data.site_id,countryId:data.country_id,userType:data.user_type,permalink:data.permalink,tags:data.tags||[]};}
   async refresh(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');const refreshToken=this.crypto.decrypt(acc.refreshTokenEncrypted);const payload=new URLSearchParams({grant_type:'refresh_token',client_id:this.config.getOrThrow('ML_CLIENT_ID'),client_secret:this.config.getOrThrow('ML_CLIENT_SECRET'),refresh_token:refreshToken});const{data}=await axios.post('https://api.mercadolibre.com/oauth/token',payload.toString(),{headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}});await this.prisma.marketplaceAccount.update({where:{id:acc.id},data:{accessTokenEncrypted:this.crypto.encrypt(data.access_token),refreshTokenEncrypted:this.crypto.encrypt(data.refresh_token),tokenExpiresAt:new Date(Date.now()+data.expires_in*1000),scope:data.scope,status:'CONNECTED',lastSyncAt:new Date()}});return{refreshed:true,expiresIn:data.expires_in,scope:data.scope,canWrite:String(data.scope||'').split(' ').includes('write')};}
   async status(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});const scope=acc?.scope||'';return{configured:Boolean(this.config.get('ML_CLIENT_ID')&&this.config.get('ML_CLIENT_SECRET')),connected:Boolean(acc),status:acc?'CONNECTED':'NOT_CONNECTED',expiresAt:acc?.tokenExpiresAt||null,lastSyncAt:acc?.lastSyncAt||null,scope,canRead:scope.split(' ').includes('read'),canWrite:scope.split(' ').includes('write'),offlineAccess:scope.split(' ').includes('offline_access'),siteId:acc?.siteId||'MLB'};}
