@@ -19,9 +19,35 @@ export class MercadoLivreService {
       throw error;
     }
   }
-  async searchCatalog(userId:string, query:string){return this.getWithToken(userId,'https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});}
-  async getItem(userId:string, itemId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
-  async getCatalogProduct(userId:string, productId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
+  private async getPublic(url:string, params?:Record<string,any>){return (await axios.get(url,{params,headers:{'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}
+  async searchCatalog(userId:string, query:string){
+    try{return await this.getWithToken(userId,'https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});}
+    catch(error:any){
+      if(error?.response?.status===403){
+        try{return await this.getPublic('https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});}
+        catch(publicError:any){
+          const apiMessage=error?.response?.data?.message||error?.response?.data?.error||'forbidden';
+          const publicStatus=publicError?.response?.status||'NETWORK';
+          throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FORBIDDEN_${apiMessage}_PUBLIC_FALLBACK_${publicStatus}`);
+        }
+      }
+      throw error;
+    }
+  }
+  async getItem(userId:string, itemId:string){
+    try{return await this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
+    catch(error:any){
+      if(error?.response?.status===403)return this.getPublic(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);
+      throw error;
+    }
+  }
+  async getCatalogProduct(userId:string, productId:string){
+    try{return await this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
+    catch(error:any){
+      if(error?.response?.status===403)return this.getPublic(`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);
+      throw error;
+    }
+  }
   async account(userId:string){const token=await this.access(userId);const{data}=await axios.get('https://api.mercadolibre.com/users/me',{headers:{Authorization:`Bearer ${token}`,'Accept':'application/json'}});await this.prisma.marketplaceAccount.updateMany({where:{userId,marketplace:'MERCADOLIVRE'},data:{lastSyncAt:new Date(),status:'CONNECTED',siteId:data.site_id||'MLB'}});return{id:data.id,nickname:data.nickname,siteId:data.site_id,countryId:data.country_id,userType:data.user_type,permalink:data.permalink,tags:data.tags||[]};}
   async refresh(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');const refreshToken=this.crypto.decrypt(acc.refreshTokenEncrypted);const payload=new URLSearchParams({grant_type:'refresh_token',client_id:this.config.getOrThrow('ML_CLIENT_ID'),client_secret:this.config.getOrThrow('ML_CLIENT_SECRET'),refresh_token:refreshToken});const{data}=await axios.post('https://api.mercadolibre.com/oauth/token',payload.toString(),{headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}});await this.prisma.marketplaceAccount.update({where:{id:acc.id},data:{accessTokenEncrypted:this.crypto.encrypt(data.access_token),refreshTokenEncrypted:this.crypto.encrypt(data.refresh_token),tokenExpiresAt:new Date(Date.now()+data.expires_in*1000),scope:data.scope,status:'CONNECTED',lastSyncAt:new Date()}});return{refreshed:true,expiresIn:data.expires_in,scope:data.scope,canWrite:String(data.scope||'').split(' ').includes('write')};}
   async status(userId:string){const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});const scope=acc?.scope||'';return{configured:Boolean(this.config.get('ML_CLIENT_ID')&&this.config.get('ML_CLIENT_SECRET')),connected:Boolean(acc),status:acc?'CONNECTED':'NOT_CONNECTED',expiresAt:acc?.tokenExpiresAt||null,lastSyncAt:acc?.lastSyncAt||null,scope,canRead:scope.split(' ').includes('read'),canWrite:scope.split(' ').includes('write'),offlineAccess:scope.split(' ').includes('offline_access'),siteId:acc?.siteId||'MLB'};}
