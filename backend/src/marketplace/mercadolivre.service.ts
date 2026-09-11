@@ -21,30 +21,22 @@ export class MercadoLivreService {
   }
   private async getPublic(url:string, params?:Record<string,any>){return (await axios.get(url,{params,headers:{'Accept':'application/json','User-Agent':'ML-Affiliate-AI/1.0'},timeout:15000})).data;}
   async searchCatalog(userId:string, query:string){
-    try{return await this.getWithToken(userId,'https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});}
-    catch(error:any){
-      if(error?.response?.status===403){
-        try{return await this.getPublic('https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});}
-        catch(publicError:any){
-          const apiMessage=error?.response?.data?.message||error?.response?.data?.error||'forbidden';
-          const publicStatus=publicError?.response?.status||'NETWORK';
-          throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FORBIDDEN_${apiMessage}_PUBLIC_FALLBACK_${publicStatus}`);
-        }
-      }
-      throw error;
-    }
+    // Product discovery uses Mercado Livre's public catalog/search endpoints. The OAuth
+    // connection is still required by the application for account-specific operations,
+    // but a user's API scope must not prevent ordinary public product discovery.
+    return this.getPublic('https://api.mercadolibre.com/sites/MLB/search',{q:query.trim(),status:'active',limit:20});
   }
   async getItem(userId:string, itemId:string){
-    try{return await this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
+    try{return await this.getPublic(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
     catch(error:any){
-      if(error?.response?.status===403)return this.getPublic(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);
+      if(error?.response?.status===401||error?.response?.status===403)return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);
       throw error;
     }
   }
   async getCatalogProduct(userId:string, productId:string){
-    try{return await this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
+    try{return await this.getPublic(`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);}
     catch(error:any){
-      if(error?.response?.status===403)return this.getPublic(`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);
+      if(error?.response?.status===401||error?.response?.status===403)return this.getWithToken(userId,`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);
       throw error;
     }
   }
