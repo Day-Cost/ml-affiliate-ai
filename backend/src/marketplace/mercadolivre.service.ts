@@ -16,10 +16,17 @@ export class MercadoLivreService {
     const acc=await this.prisma.marketplaceAccount.findUnique({where:{userId_marketplace:{userId,marketplace:'MERCADOLIVRE'}}});
     if(!acc)throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId=acc.siteId||'MLB';
-    // /sites/{site}/search is returning 403 for this integration. Use the
-    // documented authenticated Catalog Product Search instead.
     const catalog=await this.getWithToken(userId,'https://api.mercadolibre.com/products/search',{status:'active',site_id:siteId,q:query.trim(),limit:20});
-    const results=(catalog.results||[]).map((p:any)=>({id:p.buy_box_winner?.item_id||p.id,title:p.name||'',price:p.buy_box_winner?.price??null,currency_id:p.buy_box_winner?.currency_id||null,permalink:p.buy_box_winner?.permalink||p.permalink||null,thumbnail:p.pictures?.[0]?.url||p.thumbnail||null,catalog_product_id:p.id,catalog:p}));
+    const results=(catalog.results||[]).map((p:any)=>({
+      id:p.buy_box_winner?.item_id||p.id,
+      title:p.name||'',
+      price:p.buy_box_winner?.price??null,
+      currency_id:p.buy_box_winner?.currency_id||null,
+      permalink:p.buy_box_winner?.permalink||p.permalink||p.buy_box_winner?.url||null,
+      thumbnail:p.pictures?.[0]?.url||p.thumbnail||null,
+      catalog_product_id:p.id,
+      catalog:p
+    }));
     return {...catalog,results};
   }
   async getItem(userId:string,itemId:string){return this.getWithToken(userId,`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);}
