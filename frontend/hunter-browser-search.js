@@ -3,7 +3,19 @@
   const token = () => localStorage.getItem('mlai_token') || '';
   const esc = v => String(v ?? '').replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 
-  function browserSearch(query) {
+  async function browserFetchSearch(query) {
+    const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=20`;
+    const response = await fetch(url, {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw new Error(`MERCADO_LIVRE_BROWSER_HTTP_${response.status}`);
+    return response.json();
+  }
+
+  function browserJsonpSearch(query) {
     return new Promise((resolve, reject) => {
       const callback = `__mlaiSearch_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const script = document.createElement('script');
@@ -14,6 +26,21 @@
       script.src = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=20&callback=${encodeURIComponent(callback)}`;
       document.head.appendChild(script);
     });
+  }
+
+  async function browserSearch(query) {
+    // Prefer normal browser CORS. JSONP is only a compatibility fallback for
+    // older/public configurations; the normal endpoint is the official API.
+    try {
+      return await browserFetchSearch(query);
+    } catch (corsError) {
+      try {
+        return await browserJsonpSearch(query);
+      } catch (jsonpError) {
+        const detail = String(corsError?.message || jsonpError?.message || 'UNKNOWN');
+        throw new Error(`MERCADO_LIVRE_BROWSER_SEARCH_FAILED:${detail}`);
+      }
+    }
   }
 
   function renderResults(box, data) {
@@ -39,9 +66,8 @@
       }
       if (![401, 403].includes(response.status)) throw new Error(`BACKEND_SEARCH_${response.status}`);
     } catch (error) {
-      if (!String(error?.message || '').startsWith('BACKEND_SEARCH_401') && !String(error?.message || '').startsWith('BACKEND_SEARCH_403') && !String(error?.message || '').includes('403') && !String(error?.message || '').includes('401')) {
-        // Network/backend failures are also allowed to fall back to the official public search.
-      }
+      // The official browser-side search below is the recovery path when the
+      // Render server cannot reach Mercado Livre because of its outbound IP.
     }
 
     box.innerHTML = '<p class="muted">O servidor está bloqueado para a busca pública. Fazendo a mesma busca diretamente no navegador pelo endpoint oficial...</p>';
@@ -66,8 +92,6 @@
         }))
       };
 
-      // Persist the exact real ITEM_ID + permalink in our database so the product becomes
-      // eligible for the affiliate-link workflow. No scraping or unofficial proxy is used.
       if (token() && normalized.items.length) {
         try {
           const imported = await fetch(`${API}/products/browser-search-import`, {
@@ -82,12 +106,12 @@
         } catch {}
       }
 
-      // Recompute a visible score only as a transparent estimate when the server-side scorer
-      // cannot access Mercado Livre. The persisted score is calculated server-side on import.
       normalized.items = normalized.items.map(p => ({ ...p, score: p.score || 50 }));
       renderResults(box, normalized);
     } catch (error) {
-      box.innerHTML = '<p class="error">Não foi possível buscar produtos agora. A conexão do servidor com o Mercado Livre continua bloqueada (HTTP 403) e a busca direta no navegador também falhou.</p>';
+      const reason = String(error?.message || 'UNKNOWN');
+      console.error('[Orus] Mercado Livre browser search failed', reason);
+      box.innerHTML = '<p class="error">A busca do Mercado Livre foi recusada no servidor e o navegador também não conseguiu acessar a API oficial. Nenhum produto foi inventado ou salvo como válido.</p>';
     }
   };
 })();
