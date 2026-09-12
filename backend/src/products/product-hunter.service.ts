@@ -17,21 +17,27 @@ export class ProductHunterService {
   }
 
   private async resolveRealItem(userId: string, candidate: any) {
-    const initialId = String(candidate?.buy_box_winner?.item_id || candidate?.buy_box_winner?.id || candidate?.id || '').trim();
+    const winner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
+    const initialId = String(winner?.item_id || winner?.id || candidate?.id || '').trim();
     if (!initialId) return { itemId: null, detail: null, catalog: null };
     try {
       const detail = await this.mercadoLivre.getItem(userId, initialId);
       return { itemId: String(detail.id || initialId), detail, catalog: null };
     } catch (error: any) {
-      // A marketplace search result already contains the real ITEM_ID and permalink.
-      // Do not discard it merely because the secondary /items/{id} request is forbidden.
-      if (candidate?.permalink && candidate?.title) {
-        this.logger.warn(`Using direct marketplace search result for ${initialId}; item detail request failed: ${error?.response?.status || error?.message || 'unknown'}`);
-        return { itemId: initialId, detail: candidate.item || candidate, catalog: null };
+      // If the authenticated item request is unavailable, try the same official
+      // public Mercado Livre API resource. We never invent an item or URL.
+      try {
+        const detail = await this.mercadoLivre.getPublicItem(initialId);
+        return { itemId: String(detail.id || initialId), detail, catalog: null };
+      } catch (publicError: any) {
+        if (candidate?.permalink && candidate?.title) {
+          this.logger.warn(`Using direct marketplace search result for ${initialId}; item detail failed: ${error?.response?.status || error?.message || 'unknown'}`);
+          return { itemId: initialId, detail: candidate.item || candidate, catalog: null };
+        }
       }
     }
 
-    const catalogId = String(candidate?.catalog_product_id || '').trim();
+    const catalogId = String(candidate?.catalog_product_id || candidate?.item?.catalog_product_id || '').trim();
     if (!catalogId) return { itemId: null, detail: null, catalog: null };
     try {
       const catalog = await this.mercadoLivre.getCatalogProduct(userId, catalogId);
@@ -41,10 +47,15 @@ export class ProductHunterService {
         const detail = await this.mercadoLivre.getItem(userId, String(winnerId));
         return { itemId: String(detail.id || winnerId), detail, catalog };
       } catch (error: any) {
-        if (candidate?.permalink && candidate?.title) {
-          return { itemId: String(winnerId), detail: candidate.item || candidate, catalog };
+        try {
+          const detail = await this.mercadoLivre.getPublicItem(String(winnerId));
+          return { itemId: String(detail.id || winnerId), detail, catalog };
+        } catch (publicError: any) {
+          if (candidate?.permalink && candidate?.title) {
+            return { itemId: String(winnerId), detail: candidate.item || candidate, catalog };
+          }
+          throw error;
         }
-        throw error;
       }
     } catch (error: any) {
       this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.message || 'unknown error'}`);
