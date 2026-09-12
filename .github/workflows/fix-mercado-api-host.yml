@@ -1,0 +1,28 @@
+name: Fix Mercado Livre API host
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Correct official API hostname
+        run: |
+          sed -i 's/api\.mercadolivre\.com/api.mercadolibre.com/g' backend/src/marketplace/mercadolivre.service.ts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'No correction needed.'
+            exit 0
+          fi
+          git add backend/src/marketplace/mercadolivre.service.ts
+          git commit -m 'Corrige host oficial da API do Mercado Livre'
+          git push
