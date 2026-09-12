@@ -20,7 +20,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path('backend/src/products/product-hunter.service.ts')
           text = path.read_text()
@@ -44,10 +43,8 @@ jobs:
       this.logger.debug(`Public item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
     }
 
-    // Mercado Livre is currently returning 403 for /items from the Render
-    // runtime. The item_id itself is public and the canonical Brazil item URL
-    // has a deterministic form. Use this only for a real MLB item id (not a
-    // catalog product id), so we never fabricate a product or redirect target.
+    // Only accept a deterministic URL when the value is already a real MLB
+    // marketplace item id. Never convert a catalog product id into an item id.
     const match = id.match(/^(MLB)(\\d{9,})$/i);
     if (match) {
       const permalink = `https://produto.mercadolivre.com.br/${match[1].toUpperCase()}-${match[2]}`;
@@ -61,6 +58,12 @@ jobs:
           text = text[:start] + replacement + text[end:]
           path.write_text(text)
           PY
+
+      - name: Validate source
+        shell: bash
+        run: |
+          grep -q "deterministic Mercado Livre item URL fallback" backend/src/products/product-hunter.service.ts
+          echo "Product Hunter fallback validated"
 
       - name: Commit repair
         shell: bash
