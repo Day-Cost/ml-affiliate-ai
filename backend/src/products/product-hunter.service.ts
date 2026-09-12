@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, UnauthorizedException, Logger } from '@nestjs/common';
+import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
@@ -16,6 +17,14 @@ export class ProductHunterService {
     return { ready: true, userId: acc.userId };
   }
 
+  private async publicItem(itemId: string) {
+    return (await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
+      timeout: 15000,
+      proxy: false,
+    })).data;
+  }
+
   private async resolveRealItem(userId: string, candidate: any) {
     const winner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
     const initialId = String(winner?.item_id || winner?.id || candidate?.id || '').trim();
@@ -24,10 +33,8 @@ export class ProductHunterService {
       const detail = await this.mercadoLivre.getItem(userId, initialId);
       return { itemId: String(detail.id || initialId), detail, catalog: null };
     } catch (error: any) {
-      // If the authenticated item request is unavailable, try the same official
-      // public Mercado Livre API resource. We never invent an item or URL.
       try {
-        const detail = await this.mercadoLivre.getPublicItem(initialId);
+        const detail = await this.publicItem(initialId);
         return { itemId: String(detail.id || initialId), detail, catalog: null };
       } catch (publicError: any) {
         if (candidate?.permalink && candidate?.title) {
@@ -48,7 +55,7 @@ export class ProductHunterService {
         return { itemId: String(detail.id || winnerId), detail, catalog };
       } catch (error: any) {
         try {
-          const detail = await this.mercadoLivre.getPublicItem(String(winnerId));
+          const detail = await this.publicItem(String(winnerId));
           return { itemId: String(detail.id || winnerId), detail, catalog };
         } catch (publicError: any) {
           if (candidate?.permalink && candidate?.title) {
