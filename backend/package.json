@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "build": "node scripts/repair-product-hunter.js && nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "prisma:generate": "prisma generate"
@@ -26,6 +26,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@types/express": "^5.0.3",
+    "@types/node": "^22.15.0",
     "@types/node": "^22.15.0",
     "prisma": "^6.0.0",
     "typescript": "^5.7.0"
