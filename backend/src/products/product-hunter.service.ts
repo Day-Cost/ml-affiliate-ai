@@ -25,47 +25,64 @@ export class ProductHunterService {
     })).data;
   }
 
+  private async resolveItemId(userId: string, itemId: string) {
+    const id = String(itemId || '').trim();
+    if (!id) return null;
+    try {
+      const detail = await this.mercadoLivre.getItem(userId, id);
+      if (detail?.id && detail?.permalink) return detail;
+    } catch (error: any) {
+      this.logger.debug(`Authenticated item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+    try {
+      const detail = await this.publicItem(id);
+      if (detail?.id && detail?.permalink) return detail;
+    } catch (error: any) {
+      this.logger.debug(`Public item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+    return null;
+  }
+
   private async resolveRealItem(userId: string, candidate: any) {
     const winner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
-    const initialId = String(winner?.item_id || winner?.id || candidate?.id || '').trim();
-    if (!initialId) return { itemId: null, detail: null, catalog: null };
-    try {
-      const detail = await this.mercadoLivre.getItem(userId, initialId);
-      return { itemId: String(detail.id || initialId), detail, catalog: null };
-    } catch (error: any) {
-      try {
-        const detail = await this.publicItem(initialId);
-        return { itemId: String(detail.id || initialId), detail, catalog: null };
-      } catch (publicError: any) {
-        if (candidate?.permalink && candidate?.title) {
-          this.logger.warn(`Using direct marketplace search result for ${initialId}; item detail failed: ${error?.response?.status || error?.message || 'unknown'}`);
-          return { itemId: initialId, detail: candidate.item || candidate, catalog: null };
-        }
-      }
+    const winnerId = String(winner?.item_id || winner?.id || '').trim();
+
+    // Preferred path: the catalog search result already tells us the exact
+    // listing that wins the Buy Box. Resolve that listing and require its
+    // real Mercado Livre permalink.
+    if (winnerId) {
+      const detail = await this.resolveItemId(userId, winnerId);
+      if (detail) return { itemId: String(detail.id), detail, catalog: null };
     }
 
-    const catalogId = String(candidate?.catalog_product_id || candidate?.item?.catalog_product_id || '').trim();
+    // Catalog search results normally identify the catalog product with `id`.
+    // The previous implementation only checked catalog_product_id, so it could
+    // receive 20 real catalog products and discard all of them because the
+    // catalog id itself was never used to obtain buy_box_winner.item_id.
+    const catalogId = String(
+      candidate?.catalog_product_id ||
+      candidate?.item?.catalog_product_id ||
+      candidate?.id ||
+      ''
+    ).trim();
     if (!catalogId) return { itemId: null, detail: null, catalog: null };
+
     try {
       const catalog = await this.mercadoLivre.getCatalogProduct(userId, catalogId);
-      const winnerId = catalog?.buy_box_winner?.item_id;
-      if (!winnerId) return { itemId: null, detail: null, catalog };
-      try {
-        const detail = await this.mercadoLivre.getItem(userId, String(winnerId));
-        return { itemId: String(detail.id || winnerId), detail, catalog };
-      } catch (error: any) {
-        try {
-          const detail = await this.publicItem(String(winnerId));
-          return { itemId: String(detail.id || winnerId), detail, catalog };
-        } catch (publicError: any) {
-          if (candidate?.permalink && candidate?.title) {
-            return { itemId: String(winnerId), detail: candidate.item || candidate, catalog };
-          }
-          throw error;
-        }
+      const catalogWinnerId = String(catalog?.buy_box_winner?.item_id || catalog?.buy_box_winner?.id || '').trim();
+      if (!catalogWinnerId) {
+        this.logger.warn(`Catalog ${catalogId} returned without buy_box_winner.item_id`);
+        return { itemId: null, detail: null, catalog };
       }
+
+      const detail = await this.resolveItemId(userId, catalogWinnerId);
+      if (!detail) {
+        this.logger.warn(`Could not resolve real item ${catalogWinnerId} from catalog ${catalogId}`);
+        return { itemId: null, detail: null, catalog };
+      }
+      return { itemId: String(detail.id), detail, catalog };
     } catch (error: any) {
-      this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.message || 'unknown error'}`);
+      this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.response?.status || error?.message || 'unknown error'}`);
       return { itemId: null, detail: null, catalog: null };
     }
   }
@@ -89,7 +106,7 @@ export class ProductHunterService {
       if (!resolved.detail) return null;
       const detail: any = resolved.detail;
       let catalog: any = resolved.catalog || {};
-      const catalogProductId = detail.catalog_product_id || p.catalog_product_id;
+      const catalogProductId = detail.catalog_product_id || p.catalog_product_id || p.id;
       if (catalogProductId && !catalog.id) {
         try { catalog = await this.mercadoLivre.getCatalogProduct(userId, catalogProductId); } catch {}
       }
@@ -109,7 +126,9 @@ export class ProductHunterService {
       const categoryId = detail.category_id || catalog.category_id || p.category_id || null;
       const categoryName = detail.domain_name || catalog.domain_name || null;
       const imageUrl = detail.thumbnail?.secure_url || detail.thumbnail || detail.pictures?.[0]?.url || p.thumbnail || catalog.pictures?.[0]?.url || null;
-      const productUrl = detail.permalink || p.permalink || catalog.permalink || null;
+      // For Product Hunter the URL must be the exact listing permalink returned
+      // by Mercado Livre for the resolved item. Never invent or synthesize it.
+      const productUrl = detail.permalink || null;
       if (!productUrl || !id) return null;
       const product = await this.prisma.product.upsert({
         where: { id: `ml-${id}` },
@@ -143,7 +162,7 @@ export class ProductHunterService {
           try {
             const resolved = await this.resolveRealItem(acc.userId, { id: product.externalProductId });
             const detail: any = resolved.detail;
-            const permalink = detail?.permalink || resolved.catalog?.permalink || null;
+            const permalink = detail?.permalink || null;
             if (permalink && detail?.id) {
               await this.prisma.product.update({ where: { id: product.id }, data: { productUrl: permalink, externalProductId: String(detail.id) } });
               product.productUrl = permalink;
