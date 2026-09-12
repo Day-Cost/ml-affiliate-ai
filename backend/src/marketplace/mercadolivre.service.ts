@@ -385,15 +385,15 @@ export class MercadoLivreService {
   }
 
   async getItem(userId: string, itemId: string) {
-    return this.getWithToken(userId, `https://api.mercadolivre.com/items/${encodeURIComponent(itemId)}`);
+    return this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`);
   }
 
   async getCatalogProduct(userId: string, productId: string) {
-    return this.getWithToken(userId, `https://api.mercadolivre.com/products/${encodeURIComponent(productId)}`);
+    return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`);
   }
 
   async getCatalogProductItems(userId: string, productId: string) {
-    return this.getWithToken(userId, `https://api.mercadolivre.com/products/${encodeURIComponent(productId)}/items`, {
+    return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`, {
       limit: 20,
     });
   }
