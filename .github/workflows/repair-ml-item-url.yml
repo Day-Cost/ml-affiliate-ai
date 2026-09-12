@@ -1,0 +1,76 @@
+name: Repair ML item URL fallback
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch Product Hunter item resolution
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('backend/src/products/product-hunter.service.ts')
+          text = path.read_text()
+
+          start = text.index('  private async resolveItemId(userId: string, itemId: string) {')
+          end = text.index('\n  /**\n   * Converts a catalog PDP', start)
+
+          replacement = '''  private async resolveItemId(userId: string, itemId: string) {
+    const id = String(itemId || '').trim();
+    if (!id) return null;
+    try {
+      const detail = await this.mercadoLivre.getItem(userId, id);
+      if (detail?.id && detail?.permalink) return detail;
+    } catch (error: any) {
+      this.logger.debug(`Authenticated item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+    try {
+      const detail = await this.publicItem(id);
+      if (detail?.id && detail?.permalink) return detail;
+    } catch (error: any) {
+      this.logger.debug(`Public item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+
+    // Mercado Livre is currently returning 403 for /items from the Render
+    // runtime. The item_id itself is public and the canonical Brazil item URL
+    // has a deterministic form. Use this only for a real MLB item id (not a
+    // catalog product id), so we never fabricate a product or redirect target.
+    const match = id.match(/^(MLB)(\\d{9,})$/i);
+    if (match) {
+      const permalink = `https://produto.mercadolivre.com.br/${match[1].toUpperCase()}-${match[2]}`;
+      this.logger.log(`Resolved real item ${id} using deterministic Mercado Livre item URL fallback`);
+      return { id, permalink };
+    }
+    return null;
+  }
+'''
+
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text)
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/products/product-hunter.service.ts
+          if git diff --cached --quiet; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git commit -m "Corrige fallback deterministico de URL real do Mercado Livre"
+          git push
