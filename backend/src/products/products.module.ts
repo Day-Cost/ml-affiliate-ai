@@ -3,6 +3,7 @@ import { ProductsController } from './products.controller';
 import { ProductHunterService } from './product-hunter.service';
 import { ProductHunterAutoService } from './product-hunter-auto.service';
 import { BrowserSearchService } from './browser-search.service';
+import { PriceRepairService } from './price-repair.service';
 import { ScoringModule } from '../scoring/scoring.module';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../crypto.service';
@@ -12,7 +13,7 @@ import { MarketplaceModule } from '../marketplace/marketplace.module';
 @Module({
   imports: [ScoringModule, AuthModule, MarketplaceModule],
   controllers: [ProductsController],
-  providers: [ProductHunterService, ProductHunterAutoService, BrowserSearchService, PrismaService, CryptoService],
+  providers: [ProductHunterService, ProductHunterAutoService, BrowserSearchService, PriceRepairService, PrismaService, CryptoService],
   exports: [ProductHunterService],
 })
 export class ProductsModule {}
