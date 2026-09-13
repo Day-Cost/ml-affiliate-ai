@@ -26,6 +26,11 @@ export class ProductsController {
   async top(@Req() req: Request) { await this.currentUser(req); return this.hunter.top(); }
   @Get('affiliate-pending')
   async affiliatePending(@Req() req: Request) { await this.currentUser(req); return this.hunter.pendingAffiliateLinks(); }
+  @Post('by-item/:itemId/affiliate-link')
+  async affiliateLinkByItem(@Req() req: Request, @Param('itemId') itemId: string, @Body() body: { affiliateUrl: string }) {
+    const u = await this.currentUser(req);
+    return this.hunter.setAffiliateUrlByExternalId(itemId, body?.affiliateUrl, u.id);
+  }
   @Post(':id/affiliate-link')
   async affiliateLink(@Req() req: Request, @Param('id') id: string, @Body() body: { affiliateUrl: string }) {
     const u = await this.currentUser(req);
