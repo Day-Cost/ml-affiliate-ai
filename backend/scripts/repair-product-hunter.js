@@ -48,8 +48,6 @@ const searchReplacement = `  async search(query: string, userId?: string) {
 
     let data: any;
     try {
-      // MercadoLivreService performs the OAuth-authenticated listing search first.
-      // This is the authoritative source for real marketplace publications.
       data = await this.mercadoLivre.searchCatalog(userId, query);
     } catch (error: any) {
       const status = error?.response?.status;
@@ -115,11 +113,116 @@ const searchReplacement = `  async search(query: string, userId?: string) {
       };
     }))).filter(Boolean);
 
-    this.logger.log(\`Product Hunter search query="\${query}" source=oauth-real-listings results=\${rawResults.length} realListings=\${items.length}\`);
+    this.logger.log(\`Product Hunter search query="\${query}" source=real-listings results=\${rawResults.length} realListings=\${items.length}\`);
     return { query, total: items.length, items };
   }
 `;
 text = text.slice(0, searchStart) + searchReplacement + text.slice(searchEnd);
 
+// The Mercado Livre API now commonly returns 403 for server-originated general
+// listing search requests (including valid OAuth tokens). The official catalog
+// search is still supported for integrations. We use catalog search only as a
+// discovery layer, then resolve each active catalog product to a real marketplace
+// publication using buy_box_winner or /products/{id}/items. We never use a catalog
+// URL as the affiliate target and never call /items/{id} for discovery.
+const mlFile = path.join(__dirname, '..', 'src', 'marketplace', 'mercadolivre.service.ts');
+let ml = fs.readFileSync(mlFile, 'utf8');
+const mlSearchStartMarker = '  async searchCatalog(userId: string, query: string) {';
+const mlSearchEndMarker = '\n  async getItem(userId: string, itemId: string) {';
+const mlStart = ml.indexOf(mlSearchStartMarker);
+const mlEnd = ml.indexOf(mlSearchEndMarker, mlStart);
+if (mlStart < 0 || mlEnd < 0) throw new Error('MERCADO_LIVRE_SEARCH_METHOD_NOT_FOUND');
+const mlSearchReplacement = `  private buildRealListingPermalink(itemId: string) {
+    const id = String(itemId || '').trim().toUpperCase();
+    if (!/^MLB\\d{9,}$/.test(id)) return null;
+    return \`https://produto.mercadolivre.com.br/\${id.slice(0, 3)}-\${id.slice(3)}\`;
+  }
+
+  private async catalogSearch(userId: string, siteId: string, query: string) {
+    return this.getWithToken(userId, 'https://api.mercadolibre.com/products/search', {
+      status: 'active', site_id: siteId, q: query.trim(), limit: 20,
+    });
+  }
+
+  async searchCatalog(userId: string, query: string) {
+    const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
+    if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
+    const siteId = acc.siteId || 'MLB';
+
+    try {
+      const search = await this.authenticatedPublicSearch(siteId, query, userId);
+      const normalized = this.normalizeSearch(search);
+      console.log(\`[MercadoLivre] listing search ok query="\${query}" results=\${normalized.results.length}\`);
+      return normalized;
+    } catch (authError: any) {
+      const authStatus = authError?.response?.status;
+      console.warn(\`[MercadoLivre] listing search unavailable query="\${query}" status=\${authStatus || 'none'}; switching to official catalog discovery\`);
+      if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
+
+      const catalog = await this.catalogSearch(userId, siteId, query);
+      const catalogResults = Array.isArray(catalog?.results) ? catalog.results : [];
+      const realResults: any[] = [];
+
+      for (const candidate of catalogResults.slice(0, 12)) {
+        const catalogId = String(candidate?.id || candidate?.catalog_product_id || '').trim();
+        if (!catalogId) continue;
+
+        let detail: any = candidate;
+        try {
+          detail = await this.getCatalogProduct(userId, catalogId);
+        } catch (error: any) {
+          console.warn(\`[MercadoLivre] catalog detail unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
+        }
+
+        const winner = detail?.buy_box_winner || candidate?.buy_box_winner;
+        let listing = winner;
+        if (!listing?.item_id) {
+          try {
+            const listingData = await this.getCatalogProductItems(userId, catalogId);
+            listing = (listingData?.results || []).find((x: any) => /^MLB\\d{9,}$/i.test(String(x?.item_id || x?.id || '')));
+          } catch (error: any) {
+            console.warn(\`[MercadoLivre] catalog listings unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
+          }
+        }
+
+        const itemId = String(listing?.item_id || listing?.id || '').trim().toUpperCase();
+        const permalink = this.buildRealListingPermalink(itemId);
+        if (!itemId || !permalink) continue;
+
+        realResults.push({
+          id: itemId,
+          title: detail?.name || candidate?.name || '',
+          price: listing?.price ?? null,
+          currency_id: listing?.currency_id || 'BRL',
+          permalink,
+          thumbnail: detail?.pictures?.[0]?.url || candidate?.pictures?.[0]?.url || null,
+          catalog_product_id: catalogId,
+          sold_quantity: listing?.sold_quantity ?? null,
+          category_id: listing?.category_id || null,
+          seller_id: listing?.seller_id || null,
+          item: {
+            id: itemId,
+            title: detail?.name || candidate?.name || '',
+            price: listing?.price ?? null,
+            currency_id: listing?.currency_id || 'BRL',
+            permalink,
+            thumbnail: detail?.pictures?.[0]?.url || candidate?.pictures?.[0]?.url || null,
+            catalog_product_id: catalogId,
+            sold_quantity: listing?.sold_quantity ?? null,
+            category_id: listing?.category_id || null,
+            seller_id: listing?.seller_id || null,
+            available_quantity: listing?.available_quantity ?? null,
+          },
+        });
+      }
+
+      console.log(\`[MercadoLivre] catalog discovery ok query="\${query}" catalogResults=\${catalogResults.length} realListings=\${realResults.length}\`);
+      return { ...catalog, results: realResults };
+    }
+  }
+`;
+ml = ml.slice(0, mlStart) + mlSearchReplacement + ml.slice(mlEnd);
+fs.writeFileSync(mlFile, ml);
 fs.writeFileSync(file, text);
 console.log('Product Hunter repair applied');
+console.log('Mercado Livre catalog fallback repair applied');
