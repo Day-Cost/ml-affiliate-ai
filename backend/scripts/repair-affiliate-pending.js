@@ -75,5 +75,17 @@ const replacement = `  async pendingAffiliateLinks() {
 `;
 
 text = text.slice(0, start) + replacement + text.slice(end);
+
+const initMarker = '  constructor(\n    private prisma: PrismaService,';
+const initEndMarker = '\n  ) {}';
+const initStart = text.indexOf(initMarker);
+const initEnd = text.indexOf(initEndMarker, initStart);
+if (initStart < 0 || initEnd < 0) throw new Error('PRODUCT_HUNTER_CONSTRUCTOR_NOT_FOUND');
+const constructorEnd = initEnd + initEndMarker.length;
+if (!text.includes('async onModuleInit()')) {
+  const diagnostic = `\n\n  async onModuleInit() {\n    try {\n      const total = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE' } });\n      const pending = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null, productUrl: { not: null } } });\n      this.logger.log(\`Product Hunter startup diagnostic: mercadolivreProducts=\${total} pendingWithDirectUrl=\${pending}\`);\n    } catch (error: any) {\n      this.logger.warn(\`Product Hunter startup diagnostic failed: \${error?.message || 'unknown error'}\`);\n    }\n  }`;
+  text = text.slice(0, constructorEnd) + diagnostic + text.slice(constructorEnd);
+}
+
 fs.writeFileSync(file, text);
-console.log('Affiliate pending queue repair applied');
+console.log('Affiliate pending queue repair and startup diagnostic applied');
