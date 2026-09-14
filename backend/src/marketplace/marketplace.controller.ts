@@ -24,7 +24,15 @@ export class MarketplaceController {
   async callback(@Query('code') code: string, @Query('state') state: string) { return this.ml.exchangeCode(code, state); }
 
   @Get('status')
-  async status(@Req() req: Request) { return this.ml.status((await this.currentUser(req)).id); }
+  async status(@Req() req: Request) {
+    const user = await this.currentUser(req);
+    try {
+      const account = await this.ml.account(user.id);
+      return { connected: true, status: 'CONNECTED', ...account, readOnly: true, canWrite: false };
+    } catch {
+      return { connected: false, status: 'DISCONNECTED', readOnly: true, canWrite: false };
+    }
+  }
 
   @Get('account')
   async account(@Req() req: Request) { return this.ml.account((await this.currentUser(req)).id); }
