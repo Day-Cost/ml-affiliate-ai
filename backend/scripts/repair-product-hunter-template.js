@@ -9,9 +9,8 @@ const newUrl = "const upstreamUrl = String(detail?.permalink || raw?.permalink |
 if (!text.includes(oldUrl)) throw new Error('PRODUCT_HUNTER_TEMPLATE_URL_LINE_NOT_FOUND');
 text = text.replace(oldUrl, newUrl);
 
-const guard = /^\\s*if \(!\/\\^MLB.*return null;\\s*$/m;
-if (!guard.test(text)) throw new Error('PRODUCT_HUNTER_TEMPLATE_GUARD_NOT_FOUND');
-text = text.replace(guard, "      if (!/^MLB\\\\d{9,}$/i.test(id)) return null;");
+const blockedUrlCondition = new RegExp("\\s*\\|\\| !/\\^https:[^\\n]+?\\.test\\(productUrl\\)");
+text = text.replace(blockedUrlCondition, '');
 
 fs.writeFileSync(file, text);
 console.log('Product Hunter repair template patched');
