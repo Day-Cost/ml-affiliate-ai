@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "build": "node scripts/repair-product-hunter.js && node scripts/repair-affiliate-route.js && nest build",
+    "build": "node scripts/repair-product-hunter.js && node scripts/repair-affiliate-route.js && node scripts/repair-price-repair.js && nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "prisma:generate": "prisma generate"
@@ -25,7 +25,10 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
-    "@types/express": "^5.0.6",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/cli": "^11.0.0",
+    "@types/express": "^5.0.0",
     "@types/node": "^22.15.0",
     "prisma": "^6.0.0",
     "typescript": "^5.7.0"
