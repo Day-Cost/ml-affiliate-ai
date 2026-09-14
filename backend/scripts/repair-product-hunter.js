@@ -13,6 +13,14 @@ if (start < 0 || end < 0) throw new Error('PRODUCT_HUNTER_RESOLVE_ITEM_METHOD_NO
 const replacement = `  private async resolveItemId(userId: string, itemId: string) {
     const id = String(itemId || '').trim();
     if (!id) return null;
+
+    // Only real Mercado Livre marketplace publication IDs may reach /items/{id}.
+    // Catalog/product IDs are rejected before any authenticated or public item call.
+    if (!/^MLB\\d{9,}$/i.test(id)) {
+      this.logger.debug(\`Skipping non-listing Mercado Livre ID \${id}\`);
+      return null;
+    }
+
     try {
       const detail = await this.mercadoLivre.getItem(userId, id);
       if (detail?.id && detail?.permalink) return detail;
@@ -24,15 +32,6 @@ const replacement = `  private async resolveItemId(userId: string, itemId: strin
       if (detail?.id && detail?.permalink) return detail;
     } catch (error: any) {
       this.logger.debug(\`Public item lookup failed for \${id}: \${error?.response?.status || error?.message || 'unknown'}\`);
-    }
-
-    // Safe fallback only when the ID already matches the real MLB item format.
-    // Catalog IDs are intentionally rejected and can never become fake item URLs.
-    const match = id.match(/^(MLB)(\\d{9,})$/i);
-    if (match) {
-      const permalink = \`https://produto.mercadolivre.com.br/\${match[1].toUpperCase()}-\${match[2]}\`;
-      this.logger.log(\`Resolved real item \${id} using deterministic Mercado Livre item URL fallback\`);
-      return { id, permalink };
     }
     return null;
   }
