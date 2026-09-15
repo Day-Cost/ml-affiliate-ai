@@ -11,9 +11,6 @@ const end = text.indexOf(endMarker, start);
 if (start < 0 || end < 0) throw new Error('AFFILIATE_PENDING_METHOD_MARKERS_NOT_FOUND');
 
 const replacement = `  async pendingAffiliateLinks() {
-    // The pending queue must contain only real Mercado Livre publications that
-    // already have a direct marketplace URL. Old/stale catalog records without
-    // a listing URL must never make the UI show an empty or unusable queue.
     const candidates = await this.prisma.product.findMany({
       where: {
         marketplace: 'MERCADOLIVRE',
@@ -41,8 +38,14 @@ const replacement = `  async pendingAffiliateLinks() {
       take: 100,
     });
 
+    // Do not expose synthetic URLs created by older repair versions. They will
+    // be corrected when the product is searched again through the official API.
     const pending = candidates
-      .filter(p => /^https:\\/\\/(?:www\\.)?mercadolivre\\.com\\.br\\/.+|^https:\\/\\/produto\\.mercadolivre\\.com\\.br\\/.+$/i.test(String(p.productUrl || '')))
+      .filter(p => {
+        const url = String(p.productUrl || '');
+        return /^https:\\/\\/(?:www\\.)?mercadolivre\\.com\\.br\\/.+$/i.test(url)
+          && !/^https:\\/\\/produto\\.mercadolivre\\.com\\.br\\/MLB\\d+$/i.test(url);
+      })
       .map(p => ({
         id: p.id,
         externalProductId: p.externalProductId,
@@ -69,7 +72,7 @@ const replacement = `  async pendingAffiliateLinks() {
       })
       .slice(0, 50);
 
-    this.logger.log(\`Affiliate pending check: \${pending.length} real listing products ready for manual affiliate link.\`);
+    this.logger.log(`Affiliate pending check: ${pending.length} real listing products ready for manual affiliate link.`);
     return pending;
   }
 `;
