@@ -61,7 +61,7 @@ if (!text.includes('async onModuleInit()')) {
     "      this.logger.warn('Product Hunter startup diagnostic failed: ' + (error?.message || 'unknown error'));",
     '    }',
     '  }',
-  ].join('\\n');
+  ].join('\n');
   text = text.slice(0, constructorEnd) + diagnostic + text.slice(constructorEnd);
 }
 
