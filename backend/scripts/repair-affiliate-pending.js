@@ -50,7 +50,18 @@ const initEnd = text.indexOf(initEndMarker, initStart);
 if (initStart < 0 || initEnd < 0) throw new Error('PRODUCT_HUNTER_CONSTRUCTOR_NOT_FOUND');
 const constructorEnd = initEnd + initEndMarker.length;
 if (!text.includes('async onModuleInit()')) {
-  const diagnostic = `\n\n  async onModuleInit() {\n    try {\n      const total = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE' } });\n      const pending = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null, productUrl: { not: null } } });\n      this.logger.log(\`Product Hunter startup diagnostic: mercadolivreProducts=\${total} pendingWithDirectUrl=\${pending}\`);\n    } catch (error: any) {\n      this.logger.warn(\`Product Hunter startup diagnostic failed: \${error?.message || 'unknown error'}\`);\n    }\n  }`;
+  const diagnostic = [
+    '',
+    '  async onModuleInit() {',
+    '    try {',
+    "      const total = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE' } });",
+    "      const pending = await this.prisma.product.count({ where: { marketplace: 'MERCADOLIVRE', affiliateUrl: null, productUrl: { not: null } } });",
+    "      this.logger.log('Product Hunter startup diagnostic: mercadolivreProducts=' + total + ' pendingWithDirectUrl=' + pending);",
+    '    } catch (error: any) {',
+    "      this.logger.warn('Product Hunter startup diagnostic failed: ' + (error?.message || 'unknown error'));",
+    '    }',
+    '  }',
+  ].join('\\n');
   text = text.slice(0, constructorEnd) + diagnostic + text.slice(constructorEnd);
 }
 
