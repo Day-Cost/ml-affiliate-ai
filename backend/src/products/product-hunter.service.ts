@@ -95,7 +95,41 @@ export class ProductHunterService {
         }
       }
 
-      this.logger.warn(`Catalog ${catalogId} has no resolvable real item (winner/items)`);
+      // Some active catalog search results are parent PDPs: they have no
+      // buy_box_winner and their direct /products/{id}/items response can be
+      // empty. Mercado Livre exposes the purchasable variants in children_ids.
+      // Walk the children and resolve the first active child with a real
+      // buy_box_winner/item permalink. Never use a /p/ catalog permalink as
+      // the marketplace destination.
+      const children = Array.isArray(catalog?.children_ids) ? catalog.children_ids : [];
+      for (const childId of children.slice(0, 12)) {
+        try {
+          const child = await this.mercadoLivre.getCatalogProduct(userId, String(childId));
+          if (child?.status !== 'active') continue;
+          const childWinner = String(child?.buy_box_winner?.item_id || child?.buy_box_winner?.id || '').trim();
+          if (childWinner) {
+            const detail = await this.resolveItemId(userId, childWinner);
+            if (detail) {
+              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} to real item ${detail.id}`);
+              return { itemId: String(detail.id), detail, catalog: child };
+            }
+          }
+          const childItems = await this.mercadoLivre.getCatalogProductItems(userId, String(childId));
+          for (const x of (childItems?.results || []).slice(0, 10)) {
+            const listingId = String(x?.item_id || x?.id || '').trim();
+            if (!listingId) continue;
+            const detail = await this.resolveItemId(userId, listingId);
+            if (detail) {
+              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} through PDP items to real item ${detail.id}`);
+              return { itemId: String(detail.id), detail, catalog: child };
+            }
+          }
+        } catch (childError: any) {
+          this.logger.debug(`Catalog child resolution failed parent=${catalogId} child=${childId}: ${childError?.response?.status || childError?.message || 'unknown'}`);
+        }
+      }
+
+      this.logger.warn(`Catalog ${catalogId} has no resolvable real item (winner/items/children)`);
       return { itemId: null, detail: null, catalog };
     } catch (error: any) {
       this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.response?.status || error?.message || 'unknown error'}`);
