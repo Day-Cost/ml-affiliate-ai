@@ -40,7 +40,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
             const child = await this.getCatalogProduct(userId, String(childId));
             const childItemId = String(child?.buy_box_winner?.item_id || '').trim().toUpperCase();
             if (/^MLB\\d{9,}$/.test(childItemId)) candidateItemIds.push(childItemId);
-          } catch (error) {
+          } catch (error: any) {
             console.warn(\`[MercadoLivre] catalog child unavailable parent=\${catalogId} child=\${childId} status=\${error?.response?.status || 'unknown'}\`);
           }
         }
