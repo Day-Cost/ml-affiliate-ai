@@ -14,7 +14,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
         // MLB item only from an official Mercado Livre publication reference.
         const candidateItemIds = [];
         const directItemId = String(catalogDetail?.buy_box_winner?.item_id || candidate?.buy_box_winner?.item_id || '').trim().toUpperCase();
-        if (/^MLB\\d{9,}$/.test(directItemId)) candidateItemIds.push(directItemId);
+        if (/^MLB\\d{9,}$/.test(directItemId)) candidateItemIds.push({ itemId: directItemId, listing: null });
 
         // Mercado Livre can expose competing publications through the catalog
         // product's /items resource even when buy_box_winner is null.
@@ -23,7 +23,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
           const listingIds = Array.isArray(listingData?.results) ? listingData.results : [];
           for (const listing of listingIds.slice(0, 20)) {
             const listingId = String(listing?.item_id || listing?.id || '').trim().toUpperCase();
-            if (/^MLB\\d{9,}$/.test(listingId)) candidateItemIds.push(listingId);
+            if (/^MLB\\d{9,}$/.test(listingId)) candidateItemIds.push({ itemId: listingId, listing });
           }
           if (listingIds.length) {
             console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length}\`);
@@ -45,7 +45,25 @@ const replacement = `        // A catalog result is not itself a marketplace lis
           }
         }
 
-        const itemId = candidateItemIds.find(id => /^MLB\\d{9,}$/.test(id));
+        const directPublication = candidateItemIds.find(x => /^https?:\\/\\/(?:www\\.|produto\\.)?mercadolivre\\.com\\.br\\//i.test(String(x?.listing?.permalink || '')));
+        if (directPublication) {
+          const listing = directPublication.listing;
+          realResults.push({
+            id: directPublication.itemId,
+            title: listing?.title || catalogDetail?.name || candidate?.name || '',
+            price: listing?.price ?? listing?.buy_box_winner?.price ?? catalogDetail?.buy_box_winner?.price ?? null,
+            currency_id: listing?.currency_id || listing?.buy_box_winner?.currency_id || 'BRL',
+            permalink: String(listing.permalink),
+            thumbnail: listing?.thumbnail || listing?.secure_thumbnail || catalogDetail?.pictures?.[0]?.url || null,
+            catalog_product_id: catalogId,
+            sold_quantity: listing?.sold_quantity ?? listing?.buy_box_winner?.sold_quantity ?? null,
+            category_id: listing?.category_id || listing?.buy_box_winner?.category_id || null,
+            seller_id: listing?.seller_id || listing?.buy_box_winner?.seller_id || null,
+            item: listing,
+          });
+          continue;
+        }
+        const itemId = candidateItemIds.length ? candidateItemIds[0].itemId : null;
         if (!itemId) continue;
 
 `;
