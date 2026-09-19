@@ -3,8 +3,8 @@ const path = require('path');
 
 const file = path.join(__dirname, '..', 'src', 'marketplace', 'mercadolivre.service.ts');
 let text = fs.readFileSync(file, 'utf8');
-
-  '      console.log("[MercadoLivre] catalog discovery ok query=" + query + " catalogResults=" + catalogResults.length + " realListings=" + realResults.length);',
+const marker = '      console.log(`[MercadoLivre] catalog discovery ok query="${query}" catalogResults=${catalogResults.length} realListings=${realResults.length}`);';
+if (!text.includes(marker)) throw new Error('STOREFRONT_FALLBACK_MARKER_NOT_FOUND');
 if (!text.includes(marker)) throw new Error('STOREFRONT_FALLBACK_MARKER_NOT_FOUND');
 
 const replacement = [
