@@ -3,7 +3,7 @@ const path = require('path');
 
 const file = path.join(__dirname, '..', 'src', 'marketplace', 'mercadolivre.service.ts');
 let text = fs.readFileSync(file, 'utf8');
-const marker = '      console.log(`[MercadoLivre] catalog discovery ok query="${query}" catalogResults=${catalogResults.length} realListings=${realResults.length}`);';
+  '      console.log("[MercadoLivre] catalog discovery ok query=" + query + " catalogResults=" + catalogResults.length + " realListings=" + realResults.length);',
 if (!text.includes(marker)) throw new Error('STOREFRONT_FALLBACK_MARKER_NOT_FOUND');
 if (!text.includes(marker)) throw new Error('STOREFRONT_FALLBACK_MARKER_NOT_FOUND');
 
@@ -38,11 +38,11 @@ const replacement = [
   '            realResults.push({ id, title, price: null, currency_id: "BRL", permalink: url, thumbnail: null, catalog_product_id: null, sold_quantity: null, category_id: null, seller_id: null, item: null });',
   '          }',
   '          console.log("[MercadoLivre] storefront listing fallback query=" + query + " discovered=" + realResults.length);',
-  '        } catch (error) {',
+  '        } catch (error: any) {',
   '          console.warn("[MercadoLivre] storefront listing fallback failed query=" + query + " status=" + ((error && error.response && error.response.status) || "unknown"));',
   '        }',
   '      }',
-  '      console.log("[MercadoLivre] catalog discovery ok query=\"" + query + "\" catalogResults=" + catalogResults.length + " realListings=" + realResults.length);',
+  '      console.log("[MercadoLivre] catalog discovery ok query=" + query + " catalogResults=" + catalogResults.length + " realListings=" + realResults.length);',
 ].join("\n");
 text = text.replace(marker, replacement);
 fs.writeFileSync(file, text);
