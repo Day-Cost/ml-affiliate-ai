@@ -28,7 +28,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
           if (listingIds.length) {
             console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length}\`);
           }
-        } catch (error) {
+        } catch (error: any) {
           console.warn(\`[MercadoLivre] catalog publications unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
         }
 
