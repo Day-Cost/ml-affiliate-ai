@@ -90,6 +90,31 @@
     }
   }
 
+  async function automaticDiscovery() {
+    if (!token()) return;
+    const key = 'orus_auto_discovery_v1_' + new Date().toISOString().slice(0,10);
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+    const queries = ['celular','notebook','smart tv','eletrodomésticos','casa e decoração','beleza','moda','acessórios','informática','games'];
+    for (const q of queries) {
+      try {
+        const raw = await browserSearch(q);
+        if (Array.isArray(raw?.results) && raw.results.length) {
+          await fetch(`${API}/products/browser-search-import`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},
+            body:JSON.stringify({results:raw.results})
+          });
+        }
+      } catch (error) {
+        console.warn('[Orus] Automatic browser discovery skipped query='+q, error);
+      }
+      await new Promise(r=>setTimeout(r,350));
+    }
+    window.dispatchEvent(new CustomEvent('orus:auto-discovery-finished'));
+    if (typeof window.__hunterLoad === 'function') window.__hunterLoad();
+  }
+
   window.searchProducts = async function() {
     const input = document.getElementById('productQuery');
     const box = document.getElementById('results');
@@ -126,3 +151,5 @@
     }
   };
 })();
+
+  setTimeout(automaticDiscovery, 1800);
