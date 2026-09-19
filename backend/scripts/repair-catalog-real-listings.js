@@ -12,7 +12,7 @@ if (start < 0 || end < 0) throw new Error('CATALOG_REAL_LISTING_BLOCK_NOT_FOUND'
 
 const replacement = `        // A catalog result is not itself a marketplace listing. Resolve a real
         // MLB item only from an official Mercado Livre publication reference.
-        const candidateItemIds = [];
+        const candidateItemIds: Array<{ itemId: string; listing: any }> = [];
         const directItemId = String(catalogDetail?.buy_box_winner?.item_id || candidate?.buy_box_winner?.item_id || '').trim().toUpperCase();
         if (/^MLB\\d{9,}$/.test(directItemId)) candidateItemIds.push({ itemId: directItemId, listing: null });
 
@@ -26,7 +26,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
             if (/^MLB\\d{9,}$/.test(listingId)) candidateItemIds.push({ itemId: listingId, listing });
           }
           if (listingIds.length) {
-            console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length}\`);
+            console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length} permalinkResults=\${listingIds.filter((x) => /^https?:\\/\\/(?:www\\.|produto\\.)?mercadolivre\\.com\\.br\\//i.test(String(x?.permalink || ''))).length}\`);
           }
         } catch (error: any) {
           console.warn(\`[MercadoLivre] catalog publications unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
@@ -39,7 +39,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
           try {
             const child = await this.getCatalogProduct(userId, String(childId));
             const childItemId = String(child?.buy_box_winner?.item_id || '').trim().toUpperCase();
-            if (/^MLB\\d{9,}$/.test(childItemId)) candidateItemIds.push(childItemId);
+            if (/^MLB\\d{9,}$/.test(childItemId)) candidateItemIds.push({ itemId: childItemId, listing: child });
           } catch (error: any) {
             console.warn(\`[MercadoLivre] catalog child unavailable parent=\${catalogId} child=\${childId} status=\${error?.response?.status || 'unknown'}\`);
           }
