@@ -26,7 +26,7 @@ const replacement = `        // A catalog result is not itself a marketplace lis
             if (/^MLB\\d{9,}$/.test(listingId)) candidateItemIds.push({ itemId: listingId, listing });
           }
           if (listingIds.length) {
-            console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length} permalinkResults=\${listingIds.filter((x) => /^https?:\\/\\/(?:www\\.|produto\\.)?mercadolivre\\.com\\.br\\//i.test(String(x?.permalink || ''))).length}\`);
+            console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length} permalinkResults=\${listingIds.filter((x: any) => /^https?:\\/\\/(?:www\\.|produto\\.)?mercadolivre\\.com\\.br\\//i.test(String(x?.permalink || ''))).length}\`);
           }
         } catch (error: any) {
           console.warn(\`[MercadoLivre] catalog publications unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
