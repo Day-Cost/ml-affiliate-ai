@@ -4,70 +4,51 @@ const path = require('path');
 const file = path.join(__dirname, '..', 'src', 'marketplace', 'mercadolivre.service.ts');
 let text = fs.readFileSync(file, 'utf8');
 
-const oldBlock = `        const itemId = String(catalogDetail?.buy_box_winner?.item_id || candidate?.buy_box_winner?.item_id || '').trim().toUpperCase();
-        if (!/^MLB\\d{9,}$/.test(itemId)) continue;
+const startMarker = "        const itemId = String(catalogDetail?.buy_box_winner?.item_id || candidate?.buy_box_winner?.item_id || '').trim().toUpperCase();";
+const endMarker = '        let item: any;';
+const start = text.indexOf(startMarker);
+const end = text.indexOf(endMarker, start);
+if (start < 0 || end < 0) throw new Error('CATALOG_REAL_LISTING_BLOCK_NOT_FOUND');
 
-        let item: any;`;
-
-const newBlock = `        // A catalog search can return a parent product without a buy_box_winner.
-        // Mercado Livre documents that parents expose children_ids and the terminal
-        // child can carry the winning marketplace publication. Walk those official
-        // catalog children before discarding the result. Never invent an item ID or URL.
-        const candidateCatalogIds = [];
+const replacement = `        // A catalog result is not itself a marketplace listing. Resolve a real
+        // MLB item only from an official Mercado Livre publication reference.
+        const candidateItemIds = [];
         const directItemId = String(catalogDetail?.buy_box_winner?.item_id || candidate?.buy_box_winner?.item_id || '').trim().toUpperCase();
-        if (directItemId) candidateCatalogIds.push({ productId: catalogId, itemId: directItemId });
+        if (/^MLB\\d{9,}$/.test(directItemId)) candidateItemIds.push(directItemId);
 
+        // Mercado Livre can expose competing publications through the catalog
+        // product's /items resource even when buy_box_winner is null.
+        try {
+          const listingData = await this.getCatalogProductItems(userId, catalogId);
+          const listingIds = Array.isArray(listingData?.results) ? listingData.results : [];
+          for (const listing of listingIds.slice(0, 20)) {
+            const listingId = String(listing?.item_id || listing?.id || '').trim().toUpperCase();
+            if (/^MLB\\d{9,}$/.test(listingId)) candidateItemIds.push(listingId);
+          }
+          if (listingIds.length) {
+            console.log(\`[MercadoLivre] catalog publications query id=\${catalogId} results=\${listingIds.length}\`);
+          }
+        } catch (error) {
+          console.warn(\`[MercadoLivre] catalog publications unavailable id=\${catalogId} status=\${error?.response?.status || 'unknown'}\`);
+        }
+
+        // Parent catalog products expose official children_ids. Terminal children
+        // may have their own buy_box_winner.
         const children = Array.isArray(catalogDetail?.children_ids) ? catalogDetail.children_ids : [];
         for (const childId of children.slice(0, 12)) {
           try {
             const child = await this.getCatalogProduct(userId, String(childId));
             const childItemId = String(child?.buy_box_winner?.item_id || '').trim().toUpperCase();
-            if (/^MLB\\d{9,}$/.test(childItemId)) {
-              candidateCatalogIds.push({ productId: String(child?.id || childId), itemId: childItemId, catalog: child });
-            }
-          } catch (error: any) {
+            if (/^MLB\\d{9,}$/.test(childItemId)) candidateItemIds.push(childItemId);
+          } catch (error) {
             console.warn(\`[MercadoLivre] catalog child unavailable parent=\${catalogId} child=\${childId} status=\${error?.response?.status || 'unknown'}\`);
           }
         }
 
-        let itemId = null;
-        let winningCatalog = catalogDetail;
-        for (const candidateItem of candidateCatalogIds) {
-          if (/^MLB\\d{9,}$/.test(String(candidateItem.itemId || ''))) {
-            itemId = String(candidateItem.itemId).toUpperCase();
-            winningCatalog = candidateItem.catalog || catalogDetail;
-            break;
-          }
-        }
+        const itemId = candidateItemIds.find(id => /^MLB\\d{9,}$/.test(id));
         if (!itemId) continue;
 
-        let item: any;`;
-
-if (!text.includes(oldBlock)) {
-  throw new Error('CATALOG_REAL_LISTING_BLOCK_NOT_FOUND');
-}
-
-text = text.replace(oldBlock, newBlock);
-text = text.replace(
-  'price: item.price ?? catalogDetail?.buy_box_winner?.price ?? null,',
-  'price: item.price ?? winningCatalog?.buy_box_winner?.price ?? catalogDetail?.buy_box_winner?.price ?? null,'
-);
-text = text.replace(
-  'currency_id: item.currency_id || catalogDetail?.buy_box_winner?.currency_id || \'BRL\',',
-  'currency_id: item.currency_id || winningCatalog?.buy_box_winner?.currency_id || catalogDetail?.buy_box_winner?.currency_id || \'BRL\','
-);
-text = text.replace(
-  'sold_quantity: item.sold_quantity ?? catalogDetail?.buy_box_winner?.sold_quantity ?? null,',
-  'sold_quantity: item.sold_quantity ?? winningCatalog?.buy_box_winner?.sold_quantity ?? catalogDetail?.buy_box_winner?.sold_quantity ?? null,'
-);
-text = text.replace(
-  'category_id: item.category_id || catalogDetail?.buy_box_winner?.category_id || null,',
-  'category_id: item.category_id || winningCatalog?.buy_box_winner?.category_id || catalogDetail?.buy_box_winner?.category_id || null,'
-);
-text = text.replace(
-  'seller_id: item.seller_id || catalogDetail?.buy_box_winner?.seller_id || null,',
-  'seller_id: item.seller_id || winningCatalog?.buy_box_winner?.seller_id || catalogDetail?.buy_box_winner?.seller_id || null,'
-);
-
+`;
+text = text.slice(0, start) + replacement + text.slice(end);
 fs.writeFileSync(file, text);
-console.log('Catalog real-listing repair applied: parent products now resolve through official children_ids and buy_box_winner.');
+console.log('Catalog real-listing repair applied: official publication results + children_ids + buy_box_winner are resolved before accepting a listing.');
