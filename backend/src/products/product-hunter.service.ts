@@ -307,6 +307,16 @@ export class ProductHunterService {
     return pending;
   }
 
+  async setAffiliateUrlByExternalId(externalProductId: string, affiliateUrl: string, userId?: string) {
+    const externalId = String(externalProductId || '').trim();
+    if (!externalId) throw new NotFoundException('PRODUCT_NOT_FOUND');
+    const product = await this.prisma.product.findFirst({
+      where: { marketplace: 'MERCADOLIVRE', externalProductId: externalId },
+    });
+    if (!product) throw new NotFoundException('PRODUCT_NOT_FOUND');
+    return this.setAffiliateUrl(product.id, affiliateUrl, userId);
+  }
+
   async setAffiliateUrl(productId: string, affiliateUrl: string, userId?: string) {
     const url = String(affiliateUrl || '').trim();
     if (!/^https:\/\/meli\.la\/[A-Za-z0-9]+$/i.test(url)) throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MELI_SHORT_LINK');
