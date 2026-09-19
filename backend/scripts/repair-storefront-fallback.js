@@ -43,3 +43,7 @@ const replacement = [
   '        }',
   '      }',
   '      console.log("[MercadoLivre] catalog discovery ok query=\"" + query + "\" catalogResults=" + catalogResults.length + " realListings=" + realResults.length);',
+].join("\n");
+text = text.replace(marker, replacement);
+fs.writeFileSync(file, text);
+console.log('Storefront fallback repair applied.');
