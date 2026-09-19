@@ -93,8 +93,8 @@
   async function automaticDiscovery() {
     if (!token()) return;
     const key = 'orus_auto_discovery_v1_' + new Date().toISOString().slice(0,10);
-    if (sessionStorage.getItem(key)) return;
-    sessionStorage.setItem(key, '1');
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
     const queries = ['celular','notebook','smart tv','eletrodomésticos','casa e decoração','beleza','moda','acessórios','informática','games'];
     for (const q of queries) {
       try {
