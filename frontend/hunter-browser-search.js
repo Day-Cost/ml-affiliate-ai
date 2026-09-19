@@ -150,6 +150,5 @@
       box.innerHTML = '<p class="error">Não foi possível concluir a busca agora. Nenhum produto foi inventado ou salvo como válido.</p>';
     }
   };
-})();
-
   setTimeout(automaticDiscovery, 1800);
+})();
