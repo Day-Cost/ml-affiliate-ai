@@ -215,7 +215,7 @@ const mlSearchReplacement = `  private async catalogSearch(userId: string, siteI
         });
         for (const p of persisted) {
           const url = String(p.productUrl || '').trim();
-          if (!this.isRealMercadoLivreListingUrl(url)) continue;
+          if (!/^https:\/\/(?:www\.|produto\.)?mercadolivre\.com\.br\/.+$/i.test(url)) continue;
           realResults.push({
             id: p.externalProductId,
             title: p.title,
