@@ -200,7 +200,39 @@ const mlSearchReplacement = `  private async catalogSearch(userId: string, siteI
         });
       }
 
-      console.log(\`[MercadoLivre] catalog discovery ok query="\${query}" catalogResults=\${catalogResults.length} realListings=\${realResults.length}\`);
+      if (!realResults.length) {
+        const persisted = await this.prisma.product.findMany({
+          where: {
+            marketplace: 'MERCADOLIVRE',
+            productUrl: { not: null },
+            OR: [
+              { title: { contains: query, mode: 'insensitive' } },
+              { categoryId: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 20,
+        });
+        for (const p of persisted) {
+          const url = String(p.productUrl || '').trim();
+          if (!this.isRealMercadoLivreListingUrl(url)) continue;
+          realResults.push({
+            id: p.externalProductId,
+            title: p.title,
+            price: Number(p.price || 0),
+            currency_id: p.currency || 'BRL',
+            permalink: url,
+            thumbnail: p.imageUrl,
+            sold_quantity: p.soldQuantity,
+            category_id: p.categoryId,
+            seller_id: p.sellerId,
+            affiliateUrl: p.affiliateUrl,
+          });
+        }
+        console.log('[MercadoLivre] persisted real-listing fallback query="' + query + '" results=' + realResults.length);
+      }
+
+      console.log('[MercadoLivre] catalog discovery ok query="' + query + '" catalogResults=' + catalogResults.length + ' realListings=' + realResults.length);
       return { ...catalog, results: realResults };
     }
   }
