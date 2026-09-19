@@ -172,7 +172,28 @@ export class MercadoLivreService {
     }
   }
 
-  async getItem(userId: string, itemId: string) { return this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`); }
+  async getItem(userId: string, itemId: string) {
+    const url = `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`;
+    try {
+      return await this.getWithToken(userId, url);
+    } catch (error: any) {
+      // Some Mercado Livre application/token combinations can receive 403 on the
+      // public item resource even though catalog discovery is authorized. The item
+      // itself is public, so retry once without Authorization. We still require the
+      // API response to provide the real permalink; no URL is constructed locally.
+      if (error?.response?.status !== 403) throw error;
+      try {
+        return (await axios.get(url, {
+          headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
+          timeout: 15000,
+          httpsAgent: this.agent(),
+          proxy: false,
+        })).data;
+      } catch (publicError: any) {
+        throw publicError;
+      }
+    }
+  }
   async getCatalogProduct(userId: string, productId: string) { return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`); }
   async getCatalogProductItems(userId: string, productId: string) { return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`, { limit: 20 }); }
 
