@@ -3,6 +3,17 @@
   const token = () => localStorage.getItem('mlai_token') || '';
   const esc = v => String(v ?? '').replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
 
+  function productCard(p) {
+    const id = esc(p.id || p.externalProductId || '');
+    const url = esc(p.permalink || p.productUrl || '');
+    const image = esc(p.thumbnail || p.imageUrl || '');
+    const price = Number(p.price);
+    const priceText = Number.isFinite(price) && price > 0 ? `R$ ${price.toFixed(2).replace('.', ',')}` : 'Preço não informado';
+    const discount = Number(p.discountPercent) > 0 ? ` · ${Number(p.discountPercent).toFixed(0)}% desconto` : '';
+    const sold = p.soldQuantity != null ? ` · ${Number(p.soldQuantity)} vendidos` : '';
+    return `<article class="card product" data-external-product-id="${id}" data-product-id="${id}" style="margin-top:10px"><div class="product-row">${image ? `<a href="${url}" target="_blank" rel="noopener"><img class="product-img" src="${image}" alt="${esc(p.title || 'Produto')}" loading="lazy" onerror="this.style.display='none'"></a>` : ''}<div class="product-main" style="min-width:0;flex:1"><strong>${esc(p.title || 'Produto real do Mercado Livre')}</strong><div class="muted">${priceText}${discount}${sold}</div><div class="muted small">🟡 Link de afiliado necessário</div></div><div class="score-pill">${Number(p.score || 0)}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><a class="btn alt" href="${url}" target="_blank" rel="noopener">🛒 Abrir ESTE produto no Mercado Livre</a></div></article>`;
+  }
+
   async function browserFetchSearch(query) {
     const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=20`;
     const response = await fetch(url, {
@@ -67,8 +78,6 @@
   function renderResults(box, data) {
     const items = data.items || [];
     box.innerHTML = items.map(p => productCard(p)).join('') || '<p class="muted">Nenhum produto encontrado.</p>';
-    // Affiliate-flow-ui can use the real Mercado Livre item ID immediately;
-    // database enrichment continues in the background.
     window.dispatchEvent(new CustomEvent('orus:products-rendered', { detail: data }));
   }
 
@@ -121,10 +130,6 @@
     const q = input?.value?.trim() || '';
     if (!q || !box) return;
     box.innerHTML = '<p class="muted">Buscando produtos reais...</p>';
-
-    // Fast path: query Mercado Livre directly from the browser first. The old
-    // flow waited for the Render backend to resolve every catalog result into a
-    // real item before showing anything, which could take a long time.
     try {
       const raw = await browserSearch(q);
       const normalized = normalize(raw, q);
@@ -135,7 +140,6 @@
     } catch (browserError) {
       console.warn('[Orus] Fast browser search unavailable; using authenticated backend search.', browserError);
     }
-
     try {
       const response = await fetch(`${API}/products/search?q=${encodeURIComponent(q)}`, {
         headers: token() ? { Authorization: 'Bearer ' + token() } : {},
