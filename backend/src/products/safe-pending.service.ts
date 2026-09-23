@@ -5,6 +5,12 @@ import { PrismaService } from '../prisma.service';
 export class SafePendingService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private directItemUrl(externalProductId: string, fallback: string | null) {
+    const id = String(externalProductId || '').trim().toUpperCase();
+    if (/^MLB\d+$/.test(id)) return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
+    return String(fallback || '').trim();
+  }
+
   async list() {
     const products = await this.prisma.product.findMany({
       where: {
@@ -24,15 +30,40 @@ export class SafePendingService {
         categoryId: true,
         categoryName: true,
         updatedAt: true,
+        scores: { select: { score: true }, orderBy: { calculatedAt: 'desc' }, take: 1 },
       },
       orderBy: [{ updatedAt: 'desc' }],
       take: 200,
     });
 
-    return products.map((product) => ({
-      ...product,
-      price: product.price == null ? null : Number(product.price),
-      discountPercent: product.discountPercent == null ? 0 : Number(product.discountPercent),
-    }));
+    return products
+      .map((product) => {
+        const latestScore = product.scores[0]?.score == null ? null : Number(product.scores[0].score);
+        const soldQuantity = product.soldQuantity == null ? null : Number(product.soldQuantity);
+        const salesSignal = soldQuantity == null ? 0 : Math.min(100, soldQuantity > 0 ? 35 + Math.log10(soldQuantity + 1) * 20 : 25);
+        const priorityScore = Math.round(((latestScore ?? 50) * 0.65 + salesSignal * 0.35) * 100) / 100;
+        return {
+          id: product.id,
+          externalProductId: product.externalProductId,
+          title: product.title,
+          price: product.price == null ? null : Number(product.price),
+          discountPercent: product.discountPercent == null ? 0 : Number(product.discountPercent),
+          soldQuantity,
+          imageUrl: product.imageUrl,
+          productUrl: this.directItemUrl(product.externalProductId, product.productUrl),
+          categoryId: product.categoryId,
+          categoryName: product.categoryName,
+          updatedAt: product.updatedAt,
+          latestScore,
+          salesSignal: Math.round(salesSignal * 100) / 100,
+          priorityScore,
+          affiliateStatus: 'PENDING',
+          linkTarget: 'DIRECT_MERCADO_LIVRE_ITEM',
+        };
+      })
+      .sort((a, b) => {
+        if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+        return (b.soldQuantity ?? -1) - (a.soldQuantity ?? -1);
+      });
   }
 }
