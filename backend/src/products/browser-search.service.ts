@@ -6,11 +6,17 @@ import { ScoringService } from '../scoring/scoring.service';
 export class BrowserSearchService {
   constructor(private prisma: PrismaService, private scoring: ScoringService) {}
 
+  private directItemUrl(itemId: string, fallback: string) {
+    const id = String(itemId || '').trim().toUpperCase();
+    if (/^MLB\d+$/.test(id)) return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
+    return String(fallback || '').trim();
+  }
+
   async importPublicResults(userId: string, results: any[]) {
     const imported: any[] = [];
     for (const p of Array.isArray(results) ? results.slice(0, 20) : []) {
       const id = String(p?.id || '').trim();
-      const productUrl = String(p?.permalink || '').trim();
+      const productUrl = this.directItemUrl(id, p?.permalink);
       if (!id || !productUrl || !productUrl.startsWith('https://')) continue;
 
       const price = Number(p?.price || 0);
