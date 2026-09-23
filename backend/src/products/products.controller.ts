@@ -2,11 +2,12 @@ import { Body, Controller, Get, Param, Post, Query, Req, UnauthorizedException }
 import { Request } from 'express';
 import { ProductHunterService } from './product-hunter.service';
 import { BrowserSearchService } from './browser-search.service';
+import { SafePendingService } from './safe-pending.service';
 import { AuthService } from '../auth.service';
 
 @Controller('products')
 export class ProductsController {
-  constructor(private hunter: ProductHunterService, private browserSearch: BrowserSearchService, private auth: AuthService) {}
+  constructor(private hunter: ProductHunterService, private browserSearch: BrowserSearchService, private safePending: SafePendingService, private auth: AuthService) {}
 
   private async currentUser(req: Request) {
     const h = req.headers.authorization || '';
@@ -25,7 +26,7 @@ export class ProductsController {
   @Get('top')
   async top(@Req() req: Request) { await this.currentUser(req); return this.hunter.top(); }
   @Get('affiliate-pending')
-  async affiliatePending(@Req() req: Request) { await this.currentUser(req); return this.hunter.pendingAffiliateLinks(); }
+  async affiliatePending(@Req() req: Request) { await this.currentUser(req); return this.safePending.list(); }
   @Post('by-item/:itemId/affiliate-link')
   async affiliateLinkByItem(@Req() req: Request, @Param('itemId') itemId: string, @Body() body: { affiliateUrl: string }) {
     const u = await this.currentUser(req);
