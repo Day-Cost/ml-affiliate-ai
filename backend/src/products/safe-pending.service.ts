@@ -7,8 +7,10 @@ export class SafePendingService {
 
   private directItemUrl(externalProductId: string, fallback: string | null) {
     const id = String(externalProductId || '').trim().toUpperCase();
-    if (/^MLB\d+$/.test(id)) return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
-    return String(fallback || '').trim();
+    const source = String(fallback || '').trim();
+    if (/\/p\/|\/up\//i.test(source)) return null;
+    if (!/^MLB\d+$/.test(id)) return null;
+    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
   }
 
   async list() {
@@ -38,6 +40,10 @@ export class SafePendingService {
 
     return products
       .map((product) => {
+        const productUrl = this.directItemUrl(product.externalProductId, product.productUrl);
+        const price = product.price == null ? null : Number(product.price);
+        if (!productUrl || price == null || price <= 0) return null;
+
         const latestScore = product.scores[0]?.score == null ? null : Number(product.scores[0].score);
         const soldQuantity = product.soldQuantity == null ? null : Number(product.soldQuantity);
         const salesSignal = soldQuantity == null ? 0 : Math.min(100, soldQuantity > 0 ? 35 + Math.log10(soldQuantity + 1) * 20 : 25);
@@ -46,11 +52,11 @@ export class SafePendingService {
           id: product.id,
           externalProductId: product.externalProductId,
           title: product.title,
-          price: product.price == null ? null : Number(product.price),
+          price,
           discountPercent: product.discountPercent == null ? 0 : Number(product.discountPercent),
           soldQuantity,
           imageUrl: product.imageUrl,
-          productUrl: this.directItemUrl(product.externalProductId, product.productUrl),
+          productUrl,
           categoryId: product.categoryId,
           categoryName: product.categoryName,
           updatedAt: product.updatedAt,
@@ -61,6 +67,7 @@ export class SafePendingService {
           linkTarget: 'DIRECT_MERCADO_LIVRE_ITEM',
         };
       })
+      .filter((product): product is NonNullable<typeof product> => product !== null)
       .sort((a, b) => {
         if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
         return (b.soldQuantity ?? -1) - (a.soldQuantity ?? -1);
