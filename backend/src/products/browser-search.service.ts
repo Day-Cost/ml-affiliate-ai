@@ -8,18 +8,27 @@ export class BrowserSearchService {
 
   private directItemUrl(itemId: string, fallback: string) {
     const id = String(itemId || '').trim().toUpperCase();
-    if (/^MLB\d+$/.test(id)) return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
-    return String(fallback || '').trim();
+    const source = String(fallback || '').trim();
+
+    // Catalog (/p/) and User Product (/up/) URLs are not guaranteed to be
+    // direct purchasable item listings. Never send those to the affiliate queue.
+    if (/\/p\/|\/up\//i.test(source)) return null;
+    if (!/^MLB\d+$/.test(id)) return null;
+
+    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
   }
 
   async importPublicResults(userId: string, results: any[]) {
     const imported: any[] = [];
     for (const p of Array.isArray(results) ? results.slice(0, 20) : []) {
-      const id = String(p?.id || '').trim();
+      const id = String(p?.id || '').trim().toUpperCase();
       const productUrl = this.directItemUrl(id, p?.permalink);
-      if (!id || !productUrl || !productUrl.startsWith('https://')) continue;
-
       const price = Number(p?.price || 0);
+
+      // Only products with a recognizable Mercado Livre item ID, a direct
+      // listing URL, and a usable price enter the affiliate-link queue.
+      if (!productUrl || price <= 0) continue;
+
       const originalPrice = p?.original_price == null ? null : Number(p.original_price);
       const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
       const soldQuantity = p?.sold_quantity == null ? null : Number(p.sold_quantity);
@@ -70,7 +79,7 @@ export class BrowserSearchService {
         },
       });
 
-      await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: product.affiliateUrl ? 50 : 50, discount, quality, competition: 50, trend: 50, content } });
+      await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content } });
       imported.push({
         id,
         dbId: product.id,
