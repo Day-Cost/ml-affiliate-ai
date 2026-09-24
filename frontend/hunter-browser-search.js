@@ -3,6 +3,16 @@
   const token = () => localStorage.getItem('mlai_token') || '';
   const previousSearch = window.searchProducts;
 
+  function isValidatedListing(p) {
+    const id = String(p?.id || '').trim().toUpperCase();
+    const permalink = String(p?.permalink || '').trim();
+    const price = Number(p?.price || 0);
+    return /^MLB\d+$/.test(id)
+      && /^https:\/\//i.test(permalink)
+      && !/\/p\/|\/up\//i.test(permalink)
+      && price > 0;
+  }
+
   async function browserFetchSearch(query) {
     const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=20`;
     const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
@@ -26,6 +36,10 @@
   async function browserSearch(query) {
     try { return await browserFetchSearch(query); }
     catch (corsError) { return browserJsonpSearch(query); }
+  }
+
+  function validatedResults(raw) {
+    return { ...raw, results: (Array.isArray(raw?.results) ? raw.results : []).filter(isValidatedListing) };
   }
 
   function normalize(raw) {
@@ -61,11 +75,11 @@
     const box = document.getElementById('results');
     const query = input?.value?.trim() || '';
     if (!query || !box) return;
-    box.innerHTML = '<p class="muted">Buscando produtos reais no Mercado Livre...</p>';
+    box.innerHTML = '<p class="muted">Buscando anúncios diretos e validados no Mercado Livre...</p>';
     try {
-      const raw = await browserSearch(query);
+      const raw = validatedResults(await browserSearch(query));
       const items = normalize(raw);
-      if (!items.length) { box.innerHTML = '<p class="muted">Nenhum produto real encontrado.</p>'; return; }
+      if (!items.length) { box.innerHTML = '<p class="muted">Nenhum anúncio direto validado encontrado para esta busca.</p>'; return; }
       box.innerHTML = items.map(p => typeof productCard === 'function' ? productCard(p) : `<div class="card"><strong>${String(p.title || '')}</strong><p>R$ ${p.price.toFixed(2)}</p><a href="${p.permalink}" target="_blank">Abrir no Mercado Livre</a></div>`).join('');
       void importResults(raw);
       return;
@@ -84,7 +98,7 @@
     let importedAny = false;
     for (const q of queries) {
       try {
-        const raw = await browserSearch(q);
+        const raw = validatedResults(await browserSearch(q));
         if (Array.isArray(raw?.results) && raw.results.length) { await importResults(raw); importedAny = true; }
       } catch (error) { console.warn('[Orus] Automatic discovery skipped query=' + q, error); }
       await new Promise(resolve => setTimeout(resolve, 350));
