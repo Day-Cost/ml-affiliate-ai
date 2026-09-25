@@ -165,11 +165,7 @@ export class MercadoLivreService {
       console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'}`);
       if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
 
-      // When the marketplace listing-search endpoint rejects server-side traffic with
-      // 403, use Mercado Livre's authenticated Catalog Product Search. This endpoint is
-      // explicitly intended for keyword discovery and returns real catalog product IDs.
-      // Product Hunter subsequently resolves those catalog products to purchasable /items
-      // listings, so we never expose a catalog /p/ URL as the final product link.
+      // If listing search is blocked with 403, use authenticated catalog discovery.
       try {
         const search = await this.authenticatedCatalogSearch(siteId, query, userId);
         const normalized = this.normalizeSearch({
@@ -188,14 +184,15 @@ export class MercadoLivreService {
       } catch (catalogError: any) {
         const catalogStatus = catalogError?.response?.status;
         console.warn(`[MercadoLivre] authenticated catalog search failed query="${query}" status=${catalogStatus || 'none'}`);
+      }
 
-        // Public search is only a final fallback. A 403 here is not a token error.
-        try {
-          const search = await this.publicSearch(siteId, query);
-          const normalized = this.normalizeSearch(search);
-          console.log(`[MercadoLivre] public listing search fallback ok query="${query}" results=${normalized.results.length}`);
-          return normalized;
-        } catch (publicError: any) {
+      // Public search is only a final fallback.
+      try {
+        const search = await this.publicSearch(siteId, query);
+        const normalized = this.normalizeSearch(search);
+        console.log(`[MercadoLivre] public listing search fallback ok query="${query}" results=${normalized.results.length}`);
+        return normalized;
+      } catch (publicError: any) {
         const publicStatus = publicError?.response?.status;
         if (publicStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
         if (publicStatus === 403 || authStatus === 403) throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_FROM_SERVER');
