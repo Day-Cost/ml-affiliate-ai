@@ -24,9 +24,9 @@ export class ProductsController {
     return this.browserSearch.importPublicResults(u.id, body?.results || []);
   }
   @Get('top')
-  async top(@Req() req: Request) { await this.currentUser(req); return this.hunter.top(); }
+  async top(@Req() req: Request) { const u = await this.currentUser(req); return this.hunter.top(u.id); }
   @Get('affiliate-pending')
-  async affiliatePending(@Req() req: Request) { await this.currentUser(req); return this.safePending.list(); }
+  async affiliatePending(@Req() req: Request) { const u = await this.currentUser(req); return this.safePending.list(u.id); }
   @Post('by-item/:itemId/affiliate-link')
   async affiliateLinkByItem(@Req() req: Request, @Param('itemId') itemId: string, @Body() body: { affiliateUrl: string }) {
     const u = await this.currentUser(req);
