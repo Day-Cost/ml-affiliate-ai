@@ -147,6 +147,70 @@ export class MercadoLivreService {
     })).data;
   }
 
+  /**
+   * Server-side fallback for applications that receive 403 from /sites/{site}/search.
+   * We do not fabricate item URLs and we do not turn catalog/user-product IDs into item IDs.
+   * Mercado Livre's official discovery flow is:
+   *   domain_discovery/search -> category -> highlights -> ITEM/PRODUCT
+   */
+  private async bestSellerSearch(siteId: string, query: string, userId: string) {
+    const domainData = await this.getWithToken(
+      userId,
+      `https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/domain_discovery/search`,
+      { q: query.trim(), limit: 5 },
+    );
+    const domains = Array.isArray(domainData) ? domainData : [];
+    const categoryIds = [...new Set(domains.map((d: any) => String(d?.category_id || '').trim()).filter(Boolean))].slice(0, 5);
+    if (!categoryIds.length) return this.normalizeSearch({ results: [] });
+
+    const resolved: any[] = [];
+    const seen = new Set<string>();
+
+    for (const categoryId of categoryIds) {
+      let highlights: any;
+      try {
+        highlights = await this.getWithToken(
+          userId,
+          `https://api.mercadolibre.com/highlights/${encodeURIComponent(siteId)}/category/${encodeURIComponent(categoryId)}`,
+        );
+      } catch (error: any) {
+        console.warn(`[MercadoLivre] highlights failed category=${categoryId} status=${error?.response?.status || 'none'}`);
+        continue;
+      }
+
+      for (const entry of (highlights?.content || []).slice(0, 20)) {
+        const type = String(entry?.type || '').toUpperCase();
+        const entryId = String(entry?.id || '').trim().toUpperCase();
+        if (!entryId) continue;
+
+        if (type === 'ITEM' && /^MLB\\d+$/.test(entryId)) {
+          if (seen.has(entryId)) continue;
+          try {
+            const item = await this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(entryId)}`);
+            if (item?.id) { seen.add(entryId); resolved.push(item); }
+          } catch {}
+          continue;
+        }
+
+        if (type === 'PRODUCT' && /^MLB\\d+$/.test(entryId)) {
+          try {
+            const product = await this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(entryId)}`);
+            const winnerId = String(product?.buy_box_winner?.item_id || '').trim().toUpperCase();
+            if (winnerId && /^MLB\\d+$/.test(winnerId) && !seen.has(winnerId)) {
+              const item = await this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(winnerId)}`);
+              if (item?.id) { seen.add(winnerId); resolved.push(item); }
+            }
+          } catch {}
+        }
+      }
+
+      if (resolved.length >= 20) break;
+    }
+
+    console.log(`[MercadoLivre] highlights discovery query="${query}" categories=${categoryIds.length} realItems=${resolved.length}`);
+    return this.normalizeSearch({ results: resolved.slice(0, 20) });
+  }
+
   async searchCatalog(userId: string, query: string) {
     const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
     if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
@@ -165,7 +229,17 @@ export class MercadoLivreService {
       console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'}`);
       if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
 
-      // If listing search is blocked with 403, use authenticated catalog discovery.
+      // /products/search is a catalog discovery endpoint, not a marketplace listing search.
+      // Do not return its catalog IDs to Product Hunter as if they were real item IDs.
+      try {
+        const bestSellers = await this.bestSellerSearch(siteId, query, userId);
+        if (bestSellers.results.length) return bestSellers;
+      } catch (bestSellerError: any) {
+        console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'}`);
+      }
+
+      // Catalog search is retained only as a last discovery fallback. Product Hunter
+      // will reject any catalog ID that cannot be resolved to a real ITEM.
       try {
         const search = await this.authenticatedCatalogSearch(siteId, query, userId);
         const normalized = this.normalizeSearch({
