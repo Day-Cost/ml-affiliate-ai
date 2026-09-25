@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 
 @Injectable()
 export class SafePendingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly mercadoLivre: MercadoLivreService) {}
 
   private directItemUrl(externalProductId: string, fallback: string | null) {
     const id = String(externalProductId || '').trim().toUpperCase();
@@ -13,7 +14,7 @@ export class SafePendingService {
     return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
   }
 
-  async list() {
+  async list(userId: string) {
     const products = await this.prisma.product.findMany({
       where: {
         marketplace: 'MERCADOLIVRE',
@@ -38,7 +39,21 @@ export class SafePendingService {
       take: 200,
     });
 
-    return products
+    const validated = await Promise.all(products.map(async (product) => {
+      try {
+        const detail = await this.mercadoLivre.getItem(userId, product.externalProductId);
+        const id = String(detail?.id || '').toUpperCase();
+        const status = String(detail?.status || '').toLowerCase();
+        const subs = Array.isArray(detail?.sub_status) ? detail.sub_status.map((s: any) => String(s).toLowerCase()) : [];
+        const permalink = String(detail?.permalink || '');
+        if (!/^MLB\d+$/.test(id) || !/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(permalink)) return null;
+        if (status && status !== 'active') return null;
+        if (subs.some((s: string) => ['out_of_stock','deleted','inactive','closed'].includes(s))) return null;
+        return { ...product, productUrl: permalink };
+      } catch { return null; }
+    }));
+    return validated
+      .filter((product): product is NonNullable<typeof product> => product !== null)
       .map((product) => {
         const productUrl = this.directItemUrl(product.externalProductId, product.productUrl);
         const price = product.price == null ? null : Number(product.price);
