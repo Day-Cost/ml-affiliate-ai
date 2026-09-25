@@ -282,7 +282,7 @@ export class ProductHunterService {
 
   async top(userId?: string) {
     const products = await this.prisma.product.findMany({
-      select: { id: true, title: true, price: true, originalPrice: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, affiliateUrl: true, updatedAt: true, scores: { select: { score: true, calculatedAt: true }, orderBy: { calculatedAt: 'desc' }, take: 1 } },
+      select: { id: true, externalProductId: true, title: true, price: true, originalPrice: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, affiliateUrl: true, updatedAt: true, scores: { select: { score: true, calculatedAt: true }, orderBy: { calculatedAt: 'desc' }, take: 1 } },
       orderBy: [{ soldQuantity: 'desc' }, { updatedAt: 'desc' }],
       take: 50,
     });
