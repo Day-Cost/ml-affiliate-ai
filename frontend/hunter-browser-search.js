@@ -3,14 +3,35 @@
   const token = () => localStorage.getItem('mlai_token') || '';
   const previousSearch = window.searchProducts;
 
-  function isValidatedListing(p) {
+  function isCandidate(p) {
     const id = String(p?.id || '').trim().toUpperCase();
     const permalink = String(p?.permalink || '').trim();
     const price = Number(p?.price || 0);
-    return /^MLB\d+$/.test(id)
-      && /^https:\/\//i.test(permalink)
-      && !/\/p\/|\/up\//i.test(permalink)
-      && price > 0;
+    return /^MLB\d+$/.test(id) && /^https:\/\//i.test(permalink) && price > 0;
+  }
+
+  async function validateLiveListing(p) {
+    if (!isCandidate(p)) return null;
+    const id = String(p.id).trim().toUpperCase();
+    try {
+      const response = await fetch(`https://api.mercadolibre.com/items/${encodeURIComponent(id)}`, { method: 'GET', mode: 'cors', cache: 'no-store', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) return null;
+      const item = await response.json();
+      const status = String(item?.status || '').toLowerCase();
+      const availableQuantity = Number(item?.available_quantity ?? 0);
+      const soldQuantity = item?.sold_quantity ?? p.sold_quantity ?? null;
+      if (status !== 'active' || availableQuantity <= 0 || !item?.permalink || Number(item?.price || 0) <= 0) return null;
+      return { ...p, ...item, id, permalink: item.permalink, available_quantity: availableQuantity, sold_quantity: soldQuantity };
+    } catch (error) {
+      console.warn('[Orus] Live Mercado Livre validation failed for ' + id, error);
+      return null;
+    }
+  }
+
+  async function liveValidatedResults(raw) {
+    const candidates = (Array.isArray(raw?.results) ? raw.results : []).filter(isCandidate);
+    const checked = await Promise.all(candidates.map(validateLiveListing));
+    return { ...raw, results: checked.filter(Boolean) };
   }
 
   async function browserFetchSearch(query) {
@@ -38,51 +59,33 @@
     catch (corsError) { return browserJsonpSearch(query); }
   }
 
-  function validatedResults(raw) {
-    return { ...raw, results: (Array.isArray(raw?.results) ? raw.results : []).filter(isValidatedListing) };
-  }
-
   function normalize(raw) {
     return (raw.results || []).map(p => ({
-      id: p.id,
-      title: p.title,
-      price: Number(p.price || 0),
+      id: p.id, title: p.title, price: Number(p.price || 0),
       originalPrice: p.original_price == null ? null : Number(p.original_price),
       discountPercent: p.original_price && p.price ? Math.max(0, ((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0,
-      rating: p.reviews?.rating_average ?? null,
-      reviewsCount: p.reviews?.total ?? 0,
-      soldQuantity: p.sold_quantity ?? null,
-      thumbnail: p.thumbnail || '',
-      permalink: p.permalink || '',
-      score: 50,
+      rating: p.reviews?.rating_average ?? null, reviewsCount: p.reviews?.total ?? 0,
+      soldQuantity: p.sold_quantity ?? null, thumbnail: p.thumbnail || '', permalink: p.permalink || '', score: 50,
       dataQuality: { demand: p.sold_quantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: 'LINK_REQUIRED' }
     }));
   }
 
   async function importResults(raw) {
     if (!token() || !Array.isArray(raw.results) || !raw.results.length) return;
-    try {
-      await fetch(`${API}/products/browser-search-import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
-        body: JSON.stringify({ results: raw.results })
-      });
-    } catch (error) { console.warn('[Orus] Product import failed', error); }
+    try { await fetch(`${API}/products/browser-search-import`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() }, body: JSON.stringify({ results: raw.results }) }); }
+    catch (error) { console.warn('[Orus] Product import failed', error); }
   }
 
   window.searchProducts = async function() {
-    const input = document.getElementById('productQuery');
-    const box = document.getElementById('results');
-    const query = input?.value?.trim() || '';
+    const input = document.getElementById('productQuery'); const box = document.getElementById('results'); const query = input?.value?.trim() || '';
     if (!query || !box) return;
-    box.innerHTML = '<p class="muted">Buscando anúncios diretos e validados no Mercado Livre...</p>';
+    box.innerHTML = '<p class="muted">Buscando e validando anúncios disponíveis no Mercado Livre...</p>';
     try {
-      const raw = validatedResults(await browserSearch(query));
+      const raw = await liveValidatedResults(await browserSearch(query));
       const items = normalize(raw);
-      if (!items.length) { box.innerHTML = '<p class="muted">Nenhum anúncio direto validado encontrado para esta busca.</p>'; return; }
-      box.innerHTML = items.map(p => typeof productCard === 'function' ? productCard(p) : `<div class="card"><strong>${String(p.title || '')}</strong><p>R$ ${p.price.toFixed(2)}</p><a href="${p.permalink}" target="_blank">Abrir no Mercado Livre</a></div>`).join('');
-      void importResults(raw);
-      return;
+      if (!items.length) { box.innerHTML = '<p class="muted">Nenhum anúncio disponível e validado encontrado para esta busca.</p>'; return; }
+      box.innerHTML = items.map(p => typeof productCard === 'function' ? productCard(p) : `<div class="card"><strong>${String(p.title || '')}</strong><p>R$ ${p.price.toFixed(2)}</p><a href="${p.permalink}" target="_blank" rel="noopener">Abrir no Mercado Livre</a></div>`).join('');
+      void importResults(raw); return;
     } catch (browserError) {
       console.warn('[Orus] Browser search failed; restoring authenticated backend path', browserError);
       if (typeof previousSearch === 'function') return previousSearch();
@@ -92,15 +95,13 @@
 
   async function automaticDiscovery() {
     if (!token()) return;
-    const key = 'orus_auto_discovery_v1_' + new Date().toISOString().slice(0, 10);
+    const key = 'orus_auto_discovery_v2_' + new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(key)) return;
     const queries = ['celular', 'notebook', 'smart tv', 'eletrodomésticos', 'casa e decoração', 'beleza', 'moda', 'acessórios', 'informática', 'games'];
     let importedAny = false;
     for (const q of queries) {
-      try {
-        const raw = validatedResults(await browserSearch(q));
-        if (Array.isArray(raw?.results) && raw.results.length) { await importResults(raw); importedAny = true; }
-      } catch (error) { console.warn('[Orus] Automatic discovery skipped query=' + q, error); }
+      try { const raw = await liveValidatedResults(await browserSearch(q)); if (raw.results.length) { await importResults(raw); importedAny = true; } }
+      catch (error) { console.warn('[Orus] Automatic discovery skipped query=' + q, error); }
       await new Promise(resolve => setTimeout(resolve, 350));
     }
     if (importedAny) localStorage.setItem(key, '1');
