@@ -33,18 +33,30 @@ export class ProductHunterService {
     })).data;
   }
 
+  private isActiveRealListing(detail: any) {
+    const id = String(detail?.id || '').trim().toUpperCase();
+    const status = String(detail?.status || '').trim().toLowerCase();
+    const subStatuses = Array.isArray(detail?.sub_status) ? detail.sub_status.map((s: any) => String(s).trim().toLowerCase()) : [];
+    const permalink = String(detail?.permalink || '').trim();
+    if (!/^MLB\d+$/.test(id)) return false;
+    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(permalink)) return false;
+    if (status && status !== 'active') return false;
+    if (subStatuses.some((s: string) => ['out_of_stock', 'deleted', 'inactive', 'closed'].includes(s))) return false;
+    return true;
+  }
+
   private async resolveItemId(userId: string, itemId: string) {
     const id = String(itemId || '').trim();
     if (!id) return null;
     try {
       const detail = await this.mercadoLivre.getItem(userId, id);
-      if (detail?.id && detail?.permalink) return detail;
+      if (this.isActiveRealListing(detail)) return detail;
     } catch (error: any) {
       this.logger.debug(`Authenticated item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
     }
     try {
       const detail = await this.publicItem(id);
-      if (detail?.id && detail?.permalink) return detail;
+      if (this.isActiveRealListing(detail)) return detail;
     } catch (error: any) {
       this.logger.debug(`Public item lookup failed for ${id}: ${error?.response?.status || error?.message || 'unknown'}`);
     }
@@ -178,6 +190,10 @@ export class ProductHunterService {
 
       const id = String(detail.id || '');
       const productUrl = String(detail.permalink || '').trim();
+      if (!this.isActiveRealListing(detail)) {
+        this.logger.debug(`Skipping invalid/inactive Mercado Livre listing ${id} status=${detail?.status || 'unknown'}`);
+        return null;
+      }
       if (!id || !productUrl || !productUrl.startsWith('https://')) return null;
 
       const categoryId = detail.category_id || catalog.category_id || p.category_id || null;
@@ -264,13 +280,21 @@ export class ProductHunterService {
     return this.search(query, ready.userId);
   }
 
-  async top() {
+  async top(userId?: string) {
     const products = await this.prisma.product.findMany({
       select: { id: true, title: true, price: true, originalPrice: true, discountPercent: true, soldQuantity: true, imageUrl: true, productUrl: true, affiliateUrl: true, updatedAt: true, scores: { select: { score: true, calculatedAt: true }, orderBy: { calculatedAt: 'desc' }, take: 1 } },
       orderBy: [{ soldQuantity: 'desc' }, { updatedAt: 'desc' }],
       take: 50,
     });
-    return products.map(p => ({ id: p.id, title: p.title, price: Number(p.price || 0), originalPrice: p.originalPrice == null ? null : Number(p.originalPrice), discountPercent: Number(p.discountPercent || 0), soldQuantity: p.soldQuantity, imageUrl: p.imageUrl, productUrl: p.productUrl, affiliateUrl: p.affiliateUrl, affiliateStatus: p.affiliateUrl ? 'ACTIVE' : 'PENDING', updatedAt: p.updatedAt, latestScore: p.scores[0]?.score ?? null })).sort((a, b) => { const salesA = a.soldQuantity ?? -1; const salesB = b.soldQuantity ?? -1; if (salesA !== salesB) return salesB - salesA; return Number(b.latestScore || 0) - Number(a.latestScore || 0); });
+    if (!userId) return [];
+    const live = await Promise.all(products.map(async (p) => {
+      try {
+        const detail = await this.resolveItemId(userId, p.externalProductId);
+        if (!detail) return null;
+        return { id: p.id, title: p.title, price: Number(p.price || 0), originalPrice: p.originalPrice == null ? null : Number(p.originalPrice), discountPercent: Number(p.discountPercent || 0), soldQuantity: p.soldQuantity, imageUrl: p.imageUrl, productUrl: detail.permalink, affiliateUrl: p.affiliateUrl, affiliateStatus: p.affiliateUrl ? 'ACTIVE' : 'PENDING', updatedAt: p.updatedAt, latestScore: p.scores[0]?.score ?? null };
+      } catch { return null; }
+    }));
+    return live.filter(Boolean).sort((a: any, b: any) => { const salesA = a.soldQuantity ?? -1; const salesB = b.soldQuantity ?? -1; if (salesA !== salesB) return salesB - salesA; return Number(b.latestScore || 0) - Number(a.latestScore || 0); });
   }
 
   async pendingAffiliateLinks() {
