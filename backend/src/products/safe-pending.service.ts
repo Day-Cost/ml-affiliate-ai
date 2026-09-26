@@ -9,9 +9,9 @@ export class SafePendingService {
   private directItemUrl(externalProductId: string, fallback: string | null) {
     const id = String(externalProductId || '').trim().toUpperCase();
     const source = String(fallback || '').trim();
-    if (/\/p\/|\/up\//i.test(source)) return null;
     if (!/^MLB\d+$/.test(id)) return null;
-    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
+    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(source)) return null;
+    return source;
   }
 
   async list(userId: string) {
