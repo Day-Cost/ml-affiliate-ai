@@ -63,7 +63,7 @@ export class StorefrontController {
   async sitemap(@Res() res: Response) {
     const base = process.env.APP_URL || '';
     const products = await this.prisma.product.findMany({ where: { marketplace: 'MERCADOLIVRE', productUrl: { not: null } }, select: { id: true, updatedAt: true, productUrl: true }, take: 5000, orderBy: { updatedAt: 'desc' } });
-    const safeProducts = products.filter((p) => this.isOfficialAffiliateUrl(p.affiliateUrl));
+    const safeProducts = products.filter((p) => this.isRealProductUrl(p.productUrl));
     const urls = [`<url><loc>${this.escapeXml(`${base}/store`)}</loc></url>`, ...safeProducts.map((p) => `<url><loc>${this.escapeXml(`${base}/store/products/${p.id}`)}</loc><lastmod>${p.updatedAt.toISOString()}</lastmod></url>`)].join('');
     return res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
   }
