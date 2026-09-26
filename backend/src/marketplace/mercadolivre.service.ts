@@ -301,9 +301,10 @@ export class MercadoLivreService {
     const token = await this.access(userId);
     const { data } = await axios.get('https://api.mercadolibre.com/users/me', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, httpsAgent: this.agent(), proxy: false });
     await this.prisma.marketplaceAccount.updateMany({ where: { userId, marketplace: 'MERCADOLIVRE' }, data: { lastSyncAt: new Date(), status: 'CONNECTED', siteId: data.site_id || 'MLB' } });
-    const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });\n    const scopes = String(acc?.scope || '').split(/\\s+/).filter(Boolean);\n    return { id: data.id, nickname: data.nickname, siteId: data.site_id, countryId: data.country_id, userType: data.user_type, permalink: data.permalink, tags: data.tags || [], scope: acc?.scope || null, canWrite: scopes.includes('write'), readOnly: !scopes.includes('write') };
+    const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
+    const scopes = String(acc?.scope || '').split(/\s+/).filter(Boolean);
+    return { id: data.id, nickname: data.nickname, siteId: data.site_id, countryId: data.country_id, userType: data.user_type, permalink: data.permalink, tags: data.tags || [], scope: acc?.scope || null, canWrite: scopes.includes('write'), readOnly: !scopes.includes('write') };
   }
-
   async refresh(userId: string) {
     const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
     if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
