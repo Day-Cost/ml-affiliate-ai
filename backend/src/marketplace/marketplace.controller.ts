@@ -28,11 +28,14 @@ export class MarketplaceController {
     const user = await this.currentUser(req);
     try {
       const account = await this.ml.account(user.id);
-      return { connected: true, status: 'CONNECTED', ...account, readOnly: true, canWrite: false };
+      return { connected: true, status: 'CONNECTED', ...account };
     } catch {
       return { connected: false, status: 'DISCONNECTED', readOnly: true, canWrite: false };
     }
   }
+
+  @Get('diagnose')
+  async diagnose(@Req() req: Request) { return this.ml.diagnose((await this.currentUser(req)).id); }
 
   @Get('account')
   async account(@Req() req: Request) { return this.ml.account((await this.currentUser(req)).id); }
