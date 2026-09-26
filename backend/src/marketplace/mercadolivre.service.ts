@@ -160,13 +160,35 @@ export class MercadoLivreService {
       { q: query.trim(), limit: 5 },
     );
     const domains = Array.isArray(domainData) ? domainData : [];
-    const categoryIds = [...new Set(domains.map((d: any) => String(d?.category_id || '').trim()).filter(Boolean))].slice(0, 5);
-    if (!categoryIds.length) return this.normalizeSearch({ results: [] });
+    const predictedCategoryIds = [...new Set(domains.map((d: any) => String(d?.category_id || '').trim()).filter(Boolean))].slice(0, 5);
+    if (!predictedCategoryIds.length) return this.normalizeSearch({ results: [] });
+
+    // /highlights/category only works for leaf categories. The domain predictor
+    // can return a parent category, so expand each prediction to its leaf
+    // children before querying the bestseller ranking.
+    const categoryIds: string[] = [];
+    for (const predictedId of predictedCategoryIds) {
+      categoryIds.push(predictedId);
+      try {
+        const category = await this.getWithToken(
+          userId,
+          `https://api.mercadolibre.com/categories/${encodeURIComponent(predictedId)}`,
+        );
+        const children = Array.isArray(category?.children_categories) ? category.children_categories : [];
+        for (const child of children) {
+          const childId = String(child?.id || '').trim();
+          if (childId) categoryIds.push(childId);
+        }
+      } catch (error: any) {
+        console.warn(`[MercadoLivre] category expansion failed category=${predictedId} status=${error?.response?.status || 'none'}`);
+      }
+    }
+    const uniqueCategoryIds = [...new Set(categoryIds)].slice(0, 12);
 
     const resolved: any[] = [];
     const seen = new Set<string>();
 
-    for (const categoryId of categoryIds) {
+    for (const categoryId of uniqueCategoryIds) {
       let highlights: any;
       try {
         highlights = await this.getWithToken(
@@ -207,7 +229,7 @@ export class MercadoLivreService {
       if (resolved.length >= 20) break;
     }
 
-    console.log(`[MercadoLivre] highlights discovery query="${query}" categories=${categoryIds.length} realItems=${resolved.length}`);
+    console.log(`[MercadoLivre] highlights discovery query="${query}" predictedCategories=${predictedCategoryIds.length} categoriesTried=${uniqueCategoryIds.length} realItems=${resolved.length}`);
     return this.normalizeSearch({ results: resolved.slice(0, 20) });
   }
 
