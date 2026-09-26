@@ -163,28 +163,33 @@ export class MercadoLivreService {
     const predictedCategoryIds = [...new Set(domains.map((d: any) => String(d?.category_id || '').trim()).filter(Boolean))].slice(0, 5);
     if (!predictedCategoryIds.length) return this.normalizeSearch({ results: [] });
 
-    // /highlights/category only works for leaf categories. The domain predictor
-    // can return a parent category, so expand each prediction to its leaf
-    // children before querying the bestseller ranking.
-    const categoryIds: string[] = [];
-    for (const predictedId of predictedCategoryIds) {
-      categoryIds.push(predictedId);
+    // /highlights/category only works for leaf categories. The predictor can
+    // return a parent, so walk the category tree until terminal categories.
+    const leafCategoryIds: string[] = [];
+    const visitedCategories = new Set<string>();
+    const walkCategory = async (categoryId: string, depth = 0): Promise<void> => {
+      if (!categoryId || depth > 5 || visitedCategories.has(categoryId) || leafCategoryIds.length >= 30) return;
+      visitedCategories.add(categoryId);
       try {
         const category = await this.getWithToken(
           userId,
-          `https://api.mercadolibre.com/categories/${encodeURIComponent(predictedId)}`,
+          `https://api.mercadolibre.com/categories/${encodeURIComponent(categoryId)}`,
         );
-        const children = Array.isArray(category?.children_categories) ? category.children_categories : [];
-        for (const child of children) {
-          const childId = String(child?.id || '').trim();
-          if (childId) categoryIds.push(childId);
+        const children = Array.isArray(category?.children_categories)
+          ? category.children_categories.map((x: any) => String(x?.id || '').trim()).filter(Boolean)
+          : [];
+        if (!children.length) {
+          leafCategoryIds.push(categoryId);
+          return;
         }
+        for (const childId of children) await walkCategory(childId, depth + 1);
       } catch (error: any) {
-        console.warn(`[MercadoLivre] category expansion failed category=${predictedId} status=${error?.response?.status || 'none'}`);
+        console.warn(`[MercadoLivre] category expansion failed category=${categoryId} status=${error?.response?.status || 'none'}`);
       }
-    }
-    const uniqueCategoryIds = [...new Set(categoryIds)].slice(0, 12);
+    };
 
+    for (const predictedId of predictedCategoryIds) await walkCategory(predictedId);
+    const uniqueCategoryIds = [...new Set(leafCategoryIds)].slice(0, 30);
     const resolved: any[] = [];
     const seen = new Set<string>();
 
