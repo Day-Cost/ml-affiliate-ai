@@ -15,7 +15,8 @@ export class BrowserSearchService {
     if (/\/p\/|\/up\//i.test(source)) return null;
     if (!/^MLB\d+$/.test(id)) return null;
 
-    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
+    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(source)) return null;
+    return source;
   }
 
   async importPublicResults(userId: string, results: any[]) {
