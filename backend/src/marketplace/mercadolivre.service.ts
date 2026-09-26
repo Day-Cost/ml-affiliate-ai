@@ -54,7 +54,7 @@ export class MercadoLivreService {
       state,
       code_challenge: challenge,
       code_challenge_method: 'S256',
-      scope: 'offline_access read',
+      scope: 'offline_access read write',
     });
 
     return `https://auth.mercadolivre.com.br/authorization?${p.toString()}`;
@@ -100,7 +100,7 @@ export class MercadoLivreService {
     });
     await this.prisma.oAuthState.delete({ where: { state } });
 
-    return { connected: true, mercadoLivreUserId: me.data.id, expiresIn: data.expires_in, scope: data.scope, canWrite: false, readOnly: true };
+    return { connected: true, mercadoLivreUserId: me.data.id, expiresIn: data.expires_in, scope: data.scope, canWrite: String(data.scope || '').split(/\s+/).includes('write'), readOnly: !String(data.scope || '').split(/\s+/).includes('write') };
   }
 
   private async access(userId: string) {
@@ -205,7 +205,7 @@ export class MercadoLivreService {
         const entryId = String(entry?.id || '').trim().toUpperCase();
         if (!entryId) continue;
 
-        if (type === 'ITEM' && /^MLB\\d+$/.test(entryId)) {
+        if (type === 'ITEM' && /^MLB\d+$/.test(entryId)) {
           if (seen.has(entryId)) continue;
           try {
             const item = await this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(entryId)}`);
@@ -214,11 +214,11 @@ export class MercadoLivreService {
           continue;
         }
 
-        if (type === 'PRODUCT' && /^MLB\\d+$/.test(entryId)) {
+        if (type === 'PRODUCT' && /^MLB\d+$/.test(entryId)) {
           try {
             const product = await this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(entryId)}`);
             const winnerId = String(product?.buy_box_winner?.item_id || '').trim().toUpperCase();
-            if (winnerId && /^MLB\\d+$/.test(winnerId) && !seen.has(winnerId)) {
+            if (winnerId && /^MLB\d+$/.test(winnerId) && !seen.has(winnerId)) {
               const item = await this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(winnerId)}`);
               if (item?.id) { seen.add(winnerId); resolved.push(item); }
             }
@@ -248,76 +248,31 @@ export class MercadoLivreService {
       return normalized;
     } catch (authError: any) {
       const authStatus = authError?.response?.status;
-      console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'}`);
+      const authBody = authError?.response?.data;
+      console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'} body=${JSON.stringify(authBody || null)}`);
       if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
 
-      // /products/search is a catalog discovery endpoint, not a marketplace listing search.
-      // Do not return its catalog IDs to Product Hunter as if they were real item IDs.
+      // Official bestseller discovery is the only fallback. Catalog products are
+      // never returned to Product Hunter because they are not marketplace listings.
       try {
         const bestSellers = await this.bestSellerSearch(siteId, query, userId);
         if (bestSellers.results.length) return bestSellers;
+        console.warn(`[MercadoLivre] official highlights returned zero real items query="${query}"`);
       } catch (bestSellerError: any) {
-        console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'}`);
+        console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'} body=${JSON.stringify(bestSellerError?.response?.data || null)}`);
       }
 
-      // Catalog search is retained only as a last discovery fallback. Product Hunter
-      // will reject any catalog ID that cannot be resolved to a real ITEM.
-      try {
-        const search = await this.authenticatedCatalogSearch(siteId, query, userId);
-        const normalized = this.normalizeSearch({
-          ...search,
-          results: (search?.results || []).map((item: any) => ({
-            ...item,
-            id: item.id,
-            title: item.name || item.title || '',
-            catalog_product_id: item.id,
-            permalink: null,
-            price: null,
-          })),
-        });
-        console.log(`[MercadoLivre] authenticated catalog search fallback ok query="${query}" results=${normalized.results.length}`);
-        return normalized;
-      } catch (catalogError: any) {
-        const catalogStatus = catalogError?.response?.status;
-        console.warn(`[MercadoLivre] authenticated catalog search failed query="${query}" status=${catalogStatus || 'none'}`);
+      if (authStatus === 403) {
+        throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_CHECK_FUNCTIONAL_PERMISSIONS_AND_RECONNECT');
       }
-
-      // Public search is only a final fallback.
-      try {
-        const search = await this.publicSearch(siteId, query);
-        const normalized = this.normalizeSearch(search);
-        console.log(`[MercadoLivre] public listing search fallback ok query="${query}" results=${normalized.results.length}`);
-        return normalized;
-      } catch (publicError: any) {
-        const publicStatus = publicError?.response?.status;
-        if (publicStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
-        if (publicStatus === 403 || authStatus === 403) throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_FROM_SERVER');
-        throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${publicStatus || authStatus || 'NETWORK'}`);
-      }
+      throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${authStatus || 'NETWORK'}`);
     }
   }
 
   async getItem(userId: string, itemId: string) {
-    const url = `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`;
-    try {
-      return await this.getWithToken(userId, url);
-    } catch (error: any) {
-      // Some Mercado Livre application/token combinations can receive 403 on the
-      // public item resource even though catalog discovery is authorized. The item
-      // itself is public, so retry once without Authorization. We still require the
-      // API response to provide the real permalink; no URL is constructed locally.
-      if (error?.response?.status !== 403) throw error;
-      try {
-        return (await axios.get(url, {
-          headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
-          timeout: 15000,
-          httpsAgent: this.agent(),
-          proxy: false,
-        })).data;
-      } catch (publicError: any) {
-        throw publicError;
-      }
-    }
+    const id = String(itemId || '').trim().toUpperCase();
+    if (!/^MLB\d+$/.test(id)) throw new UnauthorizedException('MERCADO_LIVRE_INVALID_ITEM_ID');
+    return this.getWithToken(userId, `https://api.mercadolibre.com/items/${encodeURIComponent(id)}`);
   }
   async getCatalogProduct(userId: string, productId: string) { return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}`); }
   async getCatalogProductItems(userId: string, productId: string) { return this.getWithToken(userId, `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`, { limit: 20 }); }
