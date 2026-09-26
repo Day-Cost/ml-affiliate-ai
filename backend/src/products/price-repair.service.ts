@@ -1,12 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
+import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 
 @Injectable()
 export class PriceRepairService implements OnModuleInit {
   private readonly logger = new Logger(PriceRepairService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private mercadoLivre: MercadoLivreService) {}
 
   async onModuleInit() {
     // Do not block application startup. Repair legacy zero-price affiliate records shortly after boot.
@@ -22,17 +23,14 @@ export class PriceRepairService implements OnModuleInit {
       take: 100,
     });
 
+    const acc = await this.prisma.marketplaceAccount.findFirst({ where: { marketplace: 'MERCADOLIVRE', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
+    if (!acc) return;
     let repaired = 0;
     for (const product of products) {
       const itemId = String(product.externalProductId || '').trim();
       if (!/^MLB\d{9,}$/i.test(itemId)) continue;
       try {
-        const response = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`, {
-          headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
-          timeout: 8000,
-          proxy: false,
-        });
-        const item = response.data;
+        const item = await this.mercadoLivre.getItem(acc.userId, itemId);
         const price = Number(item?.price);
         if (!Number.isFinite(price) || price <= 0) continue;
         const originalPrice = item?.original_price == null ? null : Number(item.original_price);
