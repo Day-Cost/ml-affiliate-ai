@@ -39,12 +39,14 @@ export class ProductHunterService {
     const subStatuses = Array.isArray(detail?.sub_status) ? detail.sub_status.map((s: any) => String(s).trim().toLowerCase()) : [];
     const permalink = String(detail?.permalink || '').trim();
     if (!/^MLB\d+$/.test(id)) return false;
-    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(permalink)) return false;
+    let url: URL;
+    try { url = new URL(permalink); } catch { return false; }
+    if (!/(^|\.)mercadolivre\.com\.br$/.test(url.hostname.toLowerCase())) return false;
+    if (/\/p\/|\/up\//i.test(url.pathname)) return false;
     if (status && status !== 'active') return false;
     if (subStatuses.some((s: string) => ['out_of_stock', 'deleted', 'inactive', 'closed'].includes(s))) return false;
     return true;
   }
-
   private async resolveItemId(userId: string, itemId: string) {
     const id = String(itemId || '').trim();
     if (!id) return null;
@@ -69,6 +71,11 @@ export class ProductHunterService {
    * The target must be an /items/{item_id} permalink returned by Mercado Livre.
    */
   private async resolveRealItem(userId: string, candidate: any) {
+    const candidateId = String(candidate?.id || candidate?.item?.id || '').trim().toUpperCase();
+    if (/^MLB\d+$/.test(candidateId)) {
+      const detail = await this.resolveItemId(userId, candidateId);
+      if (detail) return { itemId: String(detail.id), detail, catalog: null };
+    }
     const directWinner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
     const directWinnerId = String(directWinner?.item_id || directWinner?.id || '').trim();
     if (directWinnerId) {
