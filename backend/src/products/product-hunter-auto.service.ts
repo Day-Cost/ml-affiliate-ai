@@ -41,10 +41,12 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
   private async run() {
     if (this.running) return;
     this.running = true;
+    let hadFailure = false;
     try {
       const ready = await this.hunter.isReadyForAutomation();
       if (!ready.ready) {
         this.logger.log(`Automatic Product Hunter aguardando Mercado Livre conectado: ${ready.reason}`);
+        hadFailure = true;
         return;
       }
 
@@ -56,13 +58,18 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
           total += Number(result?.total || 0);
           this.logger.log(`Automatic Product Hunter query="${query}" realListings=${result?.total || 0}`);
         } catch (error: any) {
+          hadFailure = true;
           this.logger.warn(`Automatic Product Hunter query="${query}" failed: ${error?.message || 'unknown error'}`);
         }
       }
-      this.logger.log(`Automatic Product Hunter finished queries=${queries.length} realListings=${total}`);
+      this.logger.log(`Automatic Product Hunter finished queries=${queries.length} realListings=${total} hadFailure=${hadFailure}`);
     } finally {
       this.running = false;
-      this.timer = setTimeout(() => this.run(), 6 * 60 * 60 * 1000);
+      // Keep the worker alive: healthy runs stay quiet for 6h; a failed run
+      // retries in 15m so a repaired OAuth/policy permission is picked up
+      // without requiring a restart or hammering the Mercado Livre API.
+      const nextRunMs = hadFailure ? 15 * 60 * 1000 : 6 * 60 * 60 * 1000;
+      this.timer = setTimeout(() => this.run(), nextRunMs);
       this.timer.unref?.();
     }
   }
