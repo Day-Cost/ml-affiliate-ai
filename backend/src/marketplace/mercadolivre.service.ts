@@ -238,38 +238,72 @@ export class MercadoLivreService {
     return this.normalizeSearch({ results: resolved.slice(0, 20) });
   }
 
+  private logApiError(context: string, error: any) {
+    const status = error?.response?.status || 'none';
+    const body = error?.response?.data;
+    const code = body?.code || body?.error || body?.cause?.[0]?.code || null;
+    const blockedBy = body?.blocked_by || null;
+    const message = body?.message || error?.message || 'unknown';
+    console.warn(`[MercadoLivre] ${context} status=${status} code=${code || 'none'} blocked_by=${blockedBy || 'none'} message="${String(message).slice(0, 240)}"`);
+    return { status, code, blockedBy, message };
+  }
+
   async searchCatalog(userId: string, query: string) {
     const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
     if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId = acc.siteId || 'MLB';
+    const attempts: string[] = [];
 
+    // 1) Real marketplace listings through the authenticated item-search endpoint.
     try {
       const search = await this.authenticatedPublicSearch(siteId, query, userId);
       const normalized = this.normalizeSearch(search);
       console.log(`[MercadoLivre] authenticated listing search ok query="${query}" results=${normalized.results.length}`);
       if (normalized.results.length) return normalized;
+      attempts.push('authenticated-listing-empty');
     } catch (authError: any) {
-      const authStatus = authError?.response?.status;
-      console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'}`);
-      if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
+      const detail = this.logApiError(`authenticated listing search failed query="${query}"`, authError);
+      attempts.push(`authenticated-listing-${detail.status}`);
+      if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
     }
 
-    // Public listing search is an official source of real MLB item publications.
+    // 2) Catalog search is a supported authenticated source. Product Hunter then
+    // resolves each catalog result to an actual MLB listing/buy-box item.
+    try {
+      const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
+      console.log(`[MercadoLivre] authenticated catalog search fallback query="${query}" results=${catalog.results.length}`);
+      if (catalog.results.length) return catalog;
+      attempts.push('authenticated-catalog-empty');
+    } catch (catalogError: any) {
+      const detail = this.logApiError(`authenticated catalog search failed query="${query}"`, catalogError);
+      attempts.push(`authenticated-catalog-${detail.status}`);
+      if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
+    }
+
+    // 3) Public listing search remains a fallback only when it is not explicitly
+    // blocked by the API policy layer. A 403 is recorded once and not retried.
     try {
       const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
       console.log(`[MercadoLivre] public listing search fallback query="${query}" results=${publicResults.results.length}`);
       if (publicResults.results.length) return publicResults;
+      attempts.push('public-listing-empty');
     } catch (publicError: any) {
-      console.warn(`[MercadoLivre] public listing search failed query="${query}" status=${publicError?.response?.status || 'none'}`);
+      const detail = this.logApiError(`public listing search failed query="${query}"`, publicError);
+      attempts.push(`public-listing-${detail.status}`);
     }
 
+    // 4) Highlights are an official read source but require the corresponding
+    // functional permission. Use it only as the final discovery fallback.
     try {
       const bestSellers = await this.bestSellerSearch(siteId, query, userId);
       if (bestSellers.results.length) return bestSellers;
+      attempts.push('highlights-empty');
     } catch (bestSellerError: any) {
-      console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'}`);
+      const detail = this.logApiError(`official highlights fallback failed query="${query}"`, bestSellerError);
+      attempts.push(`highlights-${detail.status}`);
     }
 
+    console.warn(`[MercadoLivre] search exhausted query="${query}" attempts=${attempts.join(',')}`);
     throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_NO_REAL_PRODUCTS');
   }
   async getItem(userId: string, itemId: string) {
