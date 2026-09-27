@@ -243,37 +243,35 @@ export class MercadoLivreService {
     if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId = acc.siteId || 'MLB';
 
-    // Product Hunter needs real marketplace publications. Prefer the OAuth-authenticated
-    // listing search; it avoids the server-side 403 caused by unauthenticated /search calls
-    // and never converts catalog IDs into listing IDs.
     try {
       const search = await this.authenticatedPublicSearch(siteId, query, userId);
       const normalized = this.normalizeSearch(search);
       console.log(`[MercadoLivre] authenticated listing search ok query="${query}" results=${normalized.results.length}`);
-      return normalized;
+      if (normalized.results.length) return normalized;
     } catch (authError: any) {
       const authStatus = authError?.response?.status;
-      const authBody = authError?.response?.data;
-      console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'} body=${JSON.stringify(authBody || null)}`);
+      console.warn(`[MercadoLivre] authenticated listing search failed query="${query}" status=${authStatus || 'none'}`);
       if (authStatus === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
-
-      // Official bestseller discovery is the only fallback. Catalog products are
-      // never returned to Product Hunter because they are not marketplace listings.
-      try {
-        const bestSellers = await this.bestSellerSearch(siteId, query, userId);
-        if (bestSellers.results.length) return bestSellers;
-        console.warn(`[MercadoLivre] official highlights returned zero real items query="${query}"`);
-      } catch (bestSellerError: any) {
-        console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'} body=${JSON.stringify(bestSellerError?.response?.data || null)}`);
-      }
-
-      if (authStatus === 403) {
-        throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_FORBIDDEN_CHECK_FUNCTIONAL_PERMISSIONS_AND_RECONNECT');
-      }
-      throw new UnauthorizedException(`MERCADO_LIVRE_SEARCH_FAILED_${authStatus || 'NETWORK'}`);
     }
-  }
 
+    // Public listing search is an official source of real MLB item publications.
+    try {
+      const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
+      console.log(`[MercadoLivre] public listing search fallback query="${query}" results=${publicResults.results.length}`);
+      if (publicResults.results.length) return publicResults;
+    } catch (publicError: any) {
+      console.warn(`[MercadoLivre] public listing search failed query="${query}" status=${publicError?.response?.status || 'none'}`);
+    }
+
+    try {
+      const bestSellers = await this.bestSellerSearch(siteId, query, userId);
+      if (bestSellers.results.length) return bestSellers;
+    } catch (bestSellerError: any) {
+      console.warn(`[MercadoLivre] official highlights fallback failed query="${query}" status=${bestSellerError?.response?.status || 'none'}`);
+    }
+
+    throw new UnauthorizedException('MERCADO_LIVRE_SEARCH_NO_REAL_PRODUCTS');
+  }
   async getItem(userId: string, itemId: string) {
     const id = String(itemId || '').trim().toUpperCase();
     if (!/^MLB\d+$/.test(id)) throw new UnauthorizedException('MERCADO_LIVRE_INVALID_ITEM_ID');
