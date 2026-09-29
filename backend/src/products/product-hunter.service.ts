@@ -71,15 +71,30 @@ export class ProductHunterService {
    * The target must be an /items/{item_id} permalink returned by Mercado Livre.
    */
   private async resolveRealItem(userId: string, candidate: any) {
-    const candidateId = String(candidate?.id || candidate?.item?.id || '').trim().toUpperCase();
-    if (/^MLB\d+$/.test(candidateId)) {
-      const detail = await this.resolveItemId(userId, candidateId);
+    // Catalog search results may carry the real buy-box listing inline.
+    // Prefer that listing before interpreting the catalog/product ID as an item ID.
+    const directWinner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
+    const directWinnerId = String(directWinner?.item_id || directWinner?.id || '').trim().toUpperCase();
+    if (directWinnerId) {
+      // Some Mercado Livre catalog responses already contain the complete
+      // marketplace publication. Use it when it is a valid real listing;
+      // otherwise resolve the MLB through the item endpoint.
+      if (this.isActiveRealListing(directWinner)) {
+        return { itemId: String(directWinner.id), detail: directWinner, catalog: null };
+      }
+      const detail = await this.resolveItemId(userId, directWinnerId);
       if (detail) return { itemId: String(detail.id), detail, catalog: null };
     }
-    const directWinner = candidate?.buy_box_winner || candidate?.item?.buy_box_winner;
-    const directWinnerId = String(directWinner?.item_id || directWinner?.id || '').trim();
-    if (directWinnerId) {
-      const detail = await this.resolveItemId(userId, directWinnerId);
+
+    const candidateId = String(candidate?.id || candidate?.item?.id || '').trim().toUpperCase();
+    // Only treat a candidate ID as an item when the candidate itself looks like
+    // an actual /items/ publication. Catalog PRODUCT IDs must go through the
+    // catalog resolver below.
+    const candidateLooksLikeItem = String(candidate?.permalink || candidate?.item?.permalink || '')
+      .toLowerCase()
+      .includes('/mlb-');
+    if (/^MLB\d+$/.test(candidateId) && candidateLooksLikeItem) {
+      const detail = await this.resolveItemId(userId, candidateId);
       if (detail) return { itemId: String(detail.id), detail, catalog: null };
     }
 
