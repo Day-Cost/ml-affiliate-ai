@@ -1,11 +1,14 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { buildEcommerceStrategy } from './content-strategy';
 
 @Injectable()
 export class ContentService {
   constructor(private prisma: PrismaService) {}
 
-  async list(userId: string) { return this.prisma.marketingContent.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }); }
+  async list(userId: string) {
+    return this.prisma.marketingContent.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
 
   async generate(userId: string, body: any) {
     const channel = String(body.channel || 'WEB').toUpperCase();
@@ -14,11 +17,53 @@ export class ContentService {
     const product = productId ? await this.prisma.product.findUnique({ where: { id: productId } }) : null;
     if (productId && !product) throw new NotFoundException('PRODUCT_NOT_FOUND');
     if (productId && !product?.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
-    const title = product?.title || String(body.title || 'Oferta selecionada pelo ML Affiliate AI');
+
+    const source: any = product || { title: String(body.title || 'Produto selecionado pelo Orus') };
+    const strategy = buildEcommerceStrategy(source);
     const affiliateUrl = product?.affiliateUrl || null;
-    const caption = `Confira ${title}. ${product?.discountPercent ? `Desconto de ${product.discountPercent}%. ` : ''}${affiliateUrl ? `Acesse pelo link de afiliado: ${affiliateUrl}` : 'Link de afiliado ainda não vinculado.'}`;
-    const script = `Gancho: ${title}.\nBenefício: destaque apenas benefícios reais do produto.\nOferta: apresente preço/desconto somente quando confirmado.\nCTA: use o link oficial de afiliado quando ele estiver vinculado.`;
-    return this.prisma.marketingContent.create({ data: { userId, productId, channel, contentType: type, title, caption, script: type.includes('VIDEO') || type === 'REEL' ? script : null, affiliateUrl, aiGenerated: false, status: 'DRAFT', publishMode: channel === 'WEB' ? 'AUTO' : 'MANUAL' } });
+    const title = strategy.title;
+
+    const caption = channel === 'INSTAGRAM'
+      ? strategy.instagram.caption
+      : channel === 'PINTEREST'
+        ? strategy.pinterest.description
+        : channel === 'WEB'
+          ? strategy.body_html
+          : strategy.tiktok.script;
+
+    const script = channel === 'TIKTOK' || type.includes('VIDEO') || type === 'REEL'
+      ? strategy.tiktok.script
+      : channel === 'INSTAGRAM'
+        ? strategy.instagram.caption
+        : channel === 'PINTEREST'
+          ? JSON.stringify(strategy.pinterest)
+          : null;
+
+    const saved = await this.prisma.marketingContent.create({
+      data: {
+        userId,
+        productId,
+        channel,
+        contentType: type,
+        title,
+        caption,
+        script,
+        affiliateUrl,
+        aiGenerated: true,
+        status: 'DRAFT',
+        publishMode: channel === 'WEB' ? 'AUTO' : 'MANUAL',
+      },
+    });
+
+    return {
+      id: saved.id,
+      status: saved.status,
+      title,
+      caption,
+      script,
+      affiliateUrl,
+      ...strategy,
+    };
   }
 
   async approve(userId: string, id: string) {
