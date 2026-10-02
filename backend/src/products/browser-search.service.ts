@@ -10,13 +10,20 @@ export class BrowserSearchService {
     const id = String(itemId || '').trim().toUpperCase();
     const source = String(fallback || '').trim();
 
-    // Catalog (/p/) and User Product (/up/) URLs are not guaranteed to be
-    // direct purchasable item listings. Never send those to the affiliate queue.
+    // Keep only direct Mercado Livre item URLs. Catalog PDP (/p/) and
+    // User Product (/up/) URLs are never affiliate targets.
     if (/\/p\/|\/up\//i.test(source)) return null;
     if (!/^MLB\d+$/.test(id)) return null;
 
-    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(source)) return null;
-    return source;
+    try {
+      const url = new URL(source);
+      const host = url.hostname.toLowerCase();
+      if (!['www.mercadolivre.com.br', 'produto.mercadolivre.com.br'].includes(host)) return null;
+      if (!url.pathname || url.pathname === '/') return null;
+      return url.toString();
+    } catch {
+      return null;
+    }
   }
 
   async importPublicResults(userId: string, results: any[]) {
@@ -26,8 +33,8 @@ export class BrowserSearchService {
       const productUrl = this.directItemUrl(id, p?.permalink);
       const price = Number(p?.price || 0);
 
-      // Only products with a recognizable Mercado Livre item ID, a direct
-      // listing URL, and a usable price enter the affiliate-link queue.
+      // Only products with a real Mercado Livre item ID, direct listing URL,
+      // and usable price enter the affiliate-link queue.
       if (!productUrl || price <= 0) continue;
 
       const originalPrice = p?.original_price == null ? null : Number(p.original_price);
@@ -45,56 +52,31 @@ export class BrowserSearchService {
       const product = await this.prisma.product.upsert({
         where: { marketplace_externalProductId: { marketplace: 'MERCADOLIVRE', externalProductId: id } },
         create: {
-          id: `ml-${id}`,
-          marketplace: 'MERCADOLIVRE',
-          externalProductId: id,
-          title: String(p?.title || 'Produto Mercado Livre'),
-          categoryId: p?.category_id || null,
-          price,
-          originalPrice,
-          discountPercent: discount,
-          currency: p?.currency_id || 'BRL',
-          rating,
-          reviewsCount,
-          soldQuantity,
+          id: `ml-${id}`, marketplace: 'MERCADOLIVRE', externalProductId: id,
+          title: String(p?.title || 'Produto Mercado Livre'), categoryId: p?.category_id || null,
+          price, originalPrice, discountPercent: discount, currency: p?.currency_id || 'BRL',
+          rating, reviewsCount, soldQuantity,
           sellerId: sellerId == null ? null : BigInt(sellerId),
           imageUrl: p?.thumbnail || p?.pictures?.[0]?.secure_url || p?.pictures?.[0]?.url || null,
-          productUrl,
-          affiliateUrl: null,
+          productUrl, affiliateUrl: null,
           availability: p?.available_quantity == null ? null : String(p.available_quantity),
         },
         update: {
-          title: String(p?.title || 'Produto Mercado Livre'),
-          categoryId: p?.category_id || null,
-          price,
-          originalPrice,
-          discountPercent: discount,
-          currency: p?.currency_id || 'BRL',
-          rating,
-          reviewsCount,
-          soldQuantity,
+          title: String(p?.title || 'Produto Mercado Livre'), categoryId: p?.category_id || null,
+          price, originalPrice, discountPercent: discount, currency: p?.currency_id || 'BRL',
+          rating, reviewsCount, soldQuantity,
           sellerId: sellerId == null ? null : BigInt(sellerId),
           imageUrl: p?.thumbnail || p?.pictures?.[0]?.secure_url || p?.pictures?.[0]?.url || null,
-          productUrl,
-          availability: p?.available_quantity == null ? null : String(p.available_quantity),
+          productUrl, availability: p?.available_quantity == null ? null : String(p.available_quantity),
         },
       });
 
       await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content } });
       imported.push({
-        id,
-        dbId: product.id,
-        title: product.title,
-        price,
-        originalPrice,
-        discountPercent: Number(discount.toFixed(2)),
-        rating,
-        reviewsCount,
-        soldQuantity,
-        thumbnail: product.imageUrl,
-        permalink: productUrl,
-        affiliateUrl: product.affiliateUrl,
-        score,
+        id, dbId: product.id, externalProductId: id, title: product.title, price,
+        originalPrice, discountPercent: Number(discount.toFixed(2)), rating, reviewsCount,
+        soldQuantity, thumbnail: product.imageUrl, permalink: productUrl,
+        affiliateUrl: product.affiliateUrl, score,
         affiliateStatus: product.affiliateUrl ? 'ACTIVE' : 'PENDING',
         dataQuality: { demand: soldQuantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: product.affiliateUrl ? 'LINK_READY' : 'LINK_REQUIRED', trend: 'NOT_AVAILABLE', competition: 'ESTIMATE' },
       });
