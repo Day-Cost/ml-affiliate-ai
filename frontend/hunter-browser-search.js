@@ -3,37 +3,6 @@
   const token = () => localStorage.getItem('mlai_token') || '';
   const previousSearch = window.searchProducts;
 
-  function isCandidate(p) {
-    const id = String(p?.id || '').trim().toUpperCase();
-    const permalink = String(p?.permalink || '').trim();
-    const price = Number(p?.price || 0);
-    return /^MLB\d+$/.test(id) && /^https:\/\//i.test(permalink) && price > 0;
-  }
-
-  async function validateLiveListing(p) {
-    if (!isCandidate(p)) return null;
-    const id = String(p.id).trim().toUpperCase();
-    try {
-      const response = await fetch(`https://api.mercadolibre.com/items/${encodeURIComponent(id)}`, { method: 'GET', mode: 'cors', cache: 'no-store', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
-      if (!response.ok) return null;
-      const item = await response.json();
-      const status = String(item?.status || '').toLowerCase();
-      const availableQuantity = Number(item?.available_quantity ?? 0);
-      const soldQuantity = item?.sold_quantity ?? p.sold_quantity ?? null;
-      if (status !== 'active' || availableQuantity <= 0 || !item?.permalink || Number(item?.price || 0) <= 0) return null;
-      return { ...p, ...item, id, permalink: item.permalink, available_quantity: availableQuantity, sold_quantity: soldQuantity };
-    } catch (error) {
-      console.warn('[Orus] Live Mercado Livre validation failed for ' + id, error);
-      return null;
-    }
-  }
-
-  async function liveValidatedResults(raw) {
-    const candidates = (Array.isArray(raw?.results) ? raw.results : []).filter(isCandidate);
-    const checked = await Promise.all(candidates.map(validateLiveListing));
-    return { ...raw, results: checked.filter(Boolean) };
-  }
-
   async function browserFetchSearch(query) {
     const url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(query)}&limit=20`;
     const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
@@ -59,33 +28,68 @@
     catch (corsError) { return browserJsonpSearch(query); }
   }
 
-  function normalize(raw) {
-    return (raw.results || []).map(p => ({
-      id: p.id, title: p.title, price: Number(p.price || 0),
-      originalPrice: p.original_price == null ? null : Number(p.original_price),
-      discountPercent: p.original_price && p.price ? Math.max(0, ((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0,
-      rating: p.reviews?.rating_average ?? null, reviewsCount: p.reviews?.total ?? 0,
-      soldQuantity: p.sold_quantity ?? null, thumbnail: p.thumbnail || '', permalink: p.permalink || '', score: 50,
-      dataQuality: { demand: p.sold_quantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: 'LINK_REQUIRED' }
-    }));
+  function normalize(raw, q) {
+    return {
+      query: raw.query || q,
+      total: Number(raw?.paging?.total || 0),
+      items: (raw.results || []).map(p => ({
+        id: p.id,
+        externalProductId: p.id,
+        title: p.title,
+        price: Number(p.price || 0),
+        originalPrice: p.original_price == null ? null : Number(p.original_price),
+        discountPercent: p.original_price && p.price ? Math.max(0, ((Number(p.original_price) - Number(p.price)) / Number(p.original_price)) * 100) : 0,
+        rating: p.reviews?.rating_average ?? null,
+        reviewsCount: p.reviews?.total ?? 0,
+        soldQuantity: p.sold_quantity ?? null,
+        thumbnail: p.thumbnail || '',
+        permalink: p.permalink || '',
+        score: 50,
+        dataQuality: { demand: p.sold_quantity != null ? 'REAL' : 'LIMITED', conversion: 'NOT_AVAILABLE', commission: 'LINK_REQUIRED' }
+      }))
+    };
   }
 
-  async function importResults(raw) {
-    if (!token() || !Array.isArray(raw.results) || !raw.results.length) return;
-    try { await fetch(`${API}/products/browser-search-import`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() }, body: JSON.stringify({ results: raw.results }) }); }
-    catch (error) { console.warn('[Orus] Product import failed', error); }
+  function renderResults(box, data) {
+    const items = data.items || [];
+    box.innerHTML = items.map(p => typeof productCard === 'function'
+      ? productCard(p)
+      : `<div class="card"><strong>${String(p.title || '')}</strong><p>R$ ${Number(p.price || 0).toFixed(2)}</p><a href="${p.permalink}" target="_blank" rel="noopener">Abrir no Mercado Livre</a></div>`).join('')
+      || '<p class="muted">Nenhum produto real encontrado.</p>';
+    window.dispatchEvent(new CustomEvent('orus:products-rendered', { detail: data }));
+  }
+
+  async function enrichInBackground(raw, normalized) {
+    if (!token() || !normalized.items.length) return;
+    try {
+      const response = await fetch(`${API}/products/browser-search-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+        body: JSON.stringify({ results: raw.results || [] })
+      });
+      if (!response.ok) return;
+      const saved = await response.json();
+      const byId = new Map((saved.items || []).map(p => [String(p.externalProductId || p.id), p]));
+      normalized.items = normalized.items.map(p => ({ ...p, ...(byId.get(String(p.id)) || {}) }));
+      window.dispatchEvent(new CustomEvent('orus:products-enriched', { detail: normalized }));
+    } catch (error) {
+      console.warn('[Orus] Background product enrichment failed; visible search results remain usable.', error);
+    }
   }
 
   window.searchProducts = async function() {
-    const input = document.getElementById('productQuery'); const box = document.getElementById('results'); const query = input?.value?.trim() || '';
+    const input = document.getElementById('productQuery');
+    const box = document.getElementById('results');
+    const query = input?.value?.trim() || '';
     if (!query || !box) return;
-    box.innerHTML = '<p class="muted">Buscando e validando anúncios disponíveis no Mercado Livre...</p>';
+    box.innerHTML = '<p class="muted">Buscando produtos reais no Mercado Livre...</p>';
+
     try {
-      const raw = await liveValidatedResults(await browserSearch(query));
-      const items = normalize(raw);
-      if (!items.length) { box.innerHTML = '<p class="muted">Nenhum anúncio disponível e validado encontrado para esta busca.</p>'; return; }
-      box.innerHTML = items.map(p => typeof productCard === 'function' ? productCard(p) : `<div class="card"><strong>${String(p.title || '')}</strong><p>R$ ${p.price.toFixed(2)}</p><a href="${p.permalink}" target="_blank" rel="noopener">Abrir no Mercado Livre</a></div>`).join('');
-      void importResults(raw); return;
+      const raw = await browserSearch(query);
+      const normalized = normalize(raw, query);
+      renderResults(box, normalized);
+      void enrichInBackground(raw, normalized);
+      return;
     } catch (browserError) {
       console.warn('[Orus] Browser search failed; restoring authenticated backend path', browserError);
       if (typeof previousSearch === 'function') return previousSearch();
@@ -95,13 +99,22 @@
 
   async function automaticDiscovery() {
     if (!token()) return;
-    const key = 'orus_auto_discovery_v2_' + new Date().toISOString().slice(0, 10);
+    const key = 'orus_auto_discovery_v3_' + new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(key)) return;
     const queries = ['celular', 'notebook', 'smart tv', 'eletrodomésticos', 'casa e decoração', 'beleza', 'moda', 'acessórios', 'informática', 'games'];
     let importedAny = false;
     for (const q of queries) {
-      try { const raw = await liveValidatedResults(await browserSearch(q)); if (raw.results.length) { await importResults(raw); importedAny = true; } }
-      catch (error) { console.warn('[Orus] Automatic discovery skipped query=' + q, error); }
+      try {
+        const raw = await browserSearch(q);
+        if (Array.isArray(raw?.results) && raw.results.length) {
+          await fetch(`${API}/products/browser-search-import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+            body: JSON.stringify({ results: raw.results })
+          });
+          importedAny = true;
+        }
+      } catch (error) { console.warn('[Orus] Automatic discovery skipped query=' + q, error); }
       await new Promise(resolve => setTimeout(resolve, 350));
     }
     if (importedAny) localStorage.setItem(key, '1');
