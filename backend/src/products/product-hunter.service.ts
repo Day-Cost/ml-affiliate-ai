@@ -3,6 +3,7 @@ import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
+import { buildEcommerceStrategy } from '../content/content-strategy';
 
 @Injectable()
 export class ProductHunterService {
@@ -466,19 +467,30 @@ export class ProductHunterService {
   }
 
   private async createMarketingQueue(userId: string, product: any) {
+    const strategy = buildEcommerceStrategy(product);
     const channels = [
-      { channel: 'WEB', type: 'POST', publishMode: 'AUTO' },
-      { channel: 'TIKTOK', type: 'VIDEO_SCRIPT', publishMode: 'MANUAL' },
-      { channel: 'INSTAGRAM', type: 'POST', publishMode: 'MANUAL' },
-      { channel: 'PINTEREST', type: 'POST', publishMode: 'MANUAL' },
+      { channel: 'WEB', type: 'POST', publishMode: 'AUTO', caption: strategy.body_html, script: null },
+      { channel: 'TIKTOK', type: 'VIDEO_SCRIPT', publishMode: 'MANUAL', caption: strategy.tiktok.script, script: strategy.tiktok.script },
+      { channel: 'INSTAGRAM', type: 'POST', publishMode: 'MANUAL', caption: strategy.instagram.caption, script: strategy.instagram.caption },
+      { channel: 'PINTEREST', type: 'POST', publishMode: 'MANUAL', caption: strategy.pinterest.description, script: JSON.stringify(strategy.pinterest) },
     ];
     for (const item of channels) {
       const exists = await this.prisma.marketingContent.findFirst({ where: { userId, productId: product.id, channel: item.channel, status: { in: ['DRAFT', 'APPROVED', 'PUBLISHED'] } } });
       if (exists) continue;
-      const title = product.title;
-      const caption = `Confira ${title}. ${product.discountPercent ? `Desconto de ${Number(product.discountPercent).toFixed(0)}%. ` : ''}Acesse pelo link oficial de afiliado: ${product.affiliateUrl}`;
-      const script = `Gancho: ${title}.\nMostre os principais benefícios reais do produto.\nOferta: apresente preço e desconto somente quando confirmados.\nCTA: acesse pelo link oficial de afiliado.`;
-      await this.prisma.marketingContent.create({ data: { userId, productId: product.id, channel: item.channel, contentType: item.type, title, caption, script: item.channel === 'TIKTOK' ? script : null, affiliateUrl: product.affiliateUrl, aiGenerated: false, status: 'DRAFT', publishMode: item.publishMode } });
+      await this.prisma.marketingContent.create({
+        data: {
+          userId,
+          productId: product.id,
+          channel: item.channel,
+          contentType: item.type,
+          title: strategy.title,
+          caption: item.caption,
+          script: item.script,
+          affiliateUrl: product.affiliateUrl,
+          aiGenerated: true,
+          status: 'DRAFT',
+          publishMode: item.publishMode,
+        },
+      });
     }
-  }
-}
+  }}
