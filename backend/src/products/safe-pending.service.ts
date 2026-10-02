@@ -40,13 +40,21 @@ export class SafePendingService {
     });
 
     const validated = await Promise.all(products.map(async (product) => {
+      const externalId = String(product.externalProductId || '').toUpperCase();
+      // Catalog PDPs are valid product-specific Mercado Livre destinations and
+      // can be handed to the user for manual affiliate-link generation.
+      if (/^CATALOG-MLB\d+$/.test(externalId)) {
+        const permalink = String(product.productUrl || '');
+        if (!/^https:\/\/www\.mercadolivre\.com\.br\/p\/MLB-?\d+/i.test(permalink)) return null;
+        return { ...product, productUrl: permalink };
+      }
       try {
         const detail = await this.mercadoLivre.getItem(userId, product.externalProductId);
         const id = String(detail?.id || '').toUpperCase();
         const status = String(detail?.status || '').toLowerCase();
         const subs = Array.isArray(detail?.sub_status) ? detail.sub_status.map((s: any) => String(s).toLowerCase()) : [];
         const permalink = String(detail?.permalink || '');
-        if (!/^MLB\d+$/.test(id) || !/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(permalink)) return null;
+        if (!/^MLB\d+$/.test(id) || !/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/i.test(permalink)) return null;
         if (status && status !== 'active') return null;
         if (subs.some((s: string) => ['out_of_stock','deleted','inactive','closed'].includes(s))) return null;
         return { ...product, productUrl: permalink };
@@ -57,7 +65,7 @@ export class SafePendingService {
       .map((product) => {
         const productUrl = this.directItemUrl(product.externalProductId, product.productUrl);
         const price = product.price == null ? null : Number(product.price);
-        if (!productUrl || price == null || price <= 0) return null;
+        if (!productUrl) return null;
 
         const latestScore = product.scores[0]?.score == null ? null : Number(product.scores[0].score);
         const soldQuantity = product.soldQuantity == null ? null : Number(product.soldQuantity);
