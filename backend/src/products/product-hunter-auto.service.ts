@@ -25,16 +25,16 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
       .map(x => x.trim())
       .filter(Boolean);
     return configured.length ? configured : [
-      'celular',
-      'notebook',
-      'smart tv',
-      'eletrodomésticos',
-      'casa e decoração',
-      'beleza',
-      'moda',
-      'acessórios',
-      'informática',
-      'games',
+      'peças automotivas mais vendidas',
+      'acessórios para carros mais vendidos',
+      'saúde e bem estar mais vendidos',
+      'casa e cozinha mais vendidos',
+      'alimentação e utensílios mais vendidos',
+      'air fryer mais vendidos',
+      'cafeteira mais vendidos',
+      'organização da casa mais vendidos',
+      'produtos fitness e bem estar mais vendidos',
+      'acessórios automotivos mais vendidos',
     ];
   }
 
