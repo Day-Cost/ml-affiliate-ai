@@ -230,6 +230,7 @@ export class ProductHunterService {
         currency: candidate?.currency_id || winner?.currency_id || 'BRL',
         rating,
         reviewsCount,
+        soldQuantity,
         sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
         imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
         productUrl,
