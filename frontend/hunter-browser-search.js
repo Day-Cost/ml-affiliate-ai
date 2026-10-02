@@ -84,15 +84,21 @@
     if (!query || !box) return;
     box.innerHTML = '<p class="muted">Buscando produtos reais no Mercado Livre...</p>';
 
+    // Use the authenticated server-side Product Hunter first. This avoids
+    // mobile-browser CORS/JSONP failures and preserves the working OAuth path.
+    if (typeof previousSearch === 'function') {
+      try { return await previousSearch(); }
+      catch (backendError) { console.warn('[Orus] Backend Product Hunter failed; trying direct Mercado Livre search', backendError); }
+    }
+
     try {
       const raw = await browserSearch(query);
       const normalized = normalize(raw, query);
       renderResults(box, normalized);
       void enrichInBackground(raw, normalized);
-      return;
+      return normalized;
     } catch (browserError) {
-      console.warn('[Orus] Browser search failed; restoring authenticated backend path', browserError);
-      if (typeof previousSearch === 'function') return previousSearch();
+      console.warn('[Orus] Direct Mercado Livre browser search also failed', browserError);
       box.innerHTML = '<p class="error">Não foi possível concluir a busca agora.</p>';
     }
   };
