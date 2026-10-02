@@ -171,6 +171,90 @@ export class ProductHunterService {
     }
   }
 
+  private async saveCatalogFallback(userId: string, candidate: any) {
+    const item = candidate?.item || {};
+    const catalogId = String(candidate?.catalog_product_id || item?.catalog_product_id || candidate?.id || item?.id || '').trim().toUpperCase();
+    if (!/^MLB\\d+$/.test(catalogId)) return null;
+    if (String(item?.status || '').toLowerCase() === 'inactive') return null;
+
+    const productUrl = String(candidate?.permalink || item?.permalink || `https://www.mercadolivre.com.br/p/${catalogId}`).trim();
+    if (!/^https:\\/\\/www\\.mercadolivre\\.com\\.br\\//i.test(productUrl)) return null;
+
+    const winner = item?.buy_box_winner || {};
+    const price = Number(candidate?.price ?? winner?.price ?? 0);
+    if (!(price > 0)) return null;
+
+    const originalPrice = winner?.original_price == null ? null : Number(winner.original_price);
+    const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
+    const rating = candidate?.reviews?.rating_average == null ? null : Number(candidate.reviews.rating_average);
+    const reviewsCount = Number(candidate?.reviews?.total || 0);
+    const quality = rating == null ? 50 : Math.min(100, rating * 20);
+    const pictures = Array.isArray(item?.pictures) ? item.pictures.length : (candidate?.thumbnail ? 1 : 0);
+    const content = Math.min(100, 55 + pictures * 5);
+    const score = this.scoring.calculate({ demand: 35, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
+
+    const externalProductId = `CATALOG-${catalogId}`;
+    const product = await this.prisma.product.upsert({
+      where: { marketplace_externalProductId: { marketplace: 'MERCADOLIVRE', externalProductId } },
+      create: {
+        id: `ml-catalog-${catalogId}`,
+        marketplace: 'MERCADOLIVRE',
+        externalProductId,
+        title: String(candidate?.title || item?.name || 'Produto Mercado Livre'),
+        categoryId: candidate?.category_id || item?.category_id || null,
+        price,
+        originalPrice,
+        discountPercent: discount,
+        currency: candidate?.currency_id || winner?.currency_id || 'BRL',
+        rating,
+        reviewsCount,
+        soldQuantity: null,
+        sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
+        imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
+        productUrl,
+        affiliateUrl: null,
+        availability: null,
+      },
+      update: {
+        title: String(candidate?.title || item?.name || 'Produto Mercado Livre'),
+        categoryId: candidate?.category_id || item?.category_id || null,
+        price,
+        originalPrice,
+        discountPercent: discount,
+        currency: candidate?.currency_id || winner?.currency_id || 'BRL',
+        rating,
+        reviewsCount,
+        sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
+        imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
+        productUrl,
+      },
+    });
+
+    await this.prisma.productScore.create({
+      data: { productId: product.id, score, demand: 35, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content },
+    });
+
+    return {
+      id: product.id,
+      dbId: product.id,
+      externalProductId,
+      title: product.title,
+      price,
+      originalPrice,
+      discountPercent: Number(discount.toFixed(2)),
+      rating,
+      reviewsCount,
+      soldQuantity: null,
+      thumbnail: product.imageUrl,
+      permalink: productUrl,
+      affiliateUrl: product.affiliateUrl,
+      score,
+      affiliateStatus: 'PENDING',
+      dataQuality: { demand: 'CATALOG', conversion: 'NOT_AVAILABLE', commission: 'LINK_REQUIRED', trend: 'NOT_AVAILABLE', competition: 'ESTIMATE' },
+      sourceType: 'MERCADO_LIVRE_CATALOG',
+    };
+  }
+
   async search(query: string, userId?: string) {
     if (!query.trim()) return { query, total: 0, items: [] };
     if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_USER_REQUIRED');
@@ -187,6 +271,12 @@ export class ProductHunterService {
     }
 
     const items = (await Promise.all((data.results || []).map(async (p: any) => {
+      // Mercado Livre can return valid active catalog products even when the
+      // item-detail endpoint is temporarily unavailable (for example HTTP 403).
+      // Keep the real catalog PDP visible instead of dropping every result.
+      const catalogFallback = await this.saveCatalogFallback(userId, p);
+      if (catalogFallback) return catalogFallback;
+
       const resolved = await this.resolveRealItem(userId, p);
       if (!resolved.detail) return null;
 
