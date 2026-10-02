@@ -52,18 +52,18 @@ export function buildEcommerceStrategy(p: StrategyProduct) {
   const category = productCategory(p);
   const price = money(p.price);
   const d = discount(p);
-  const title = name.length > 70 ? name.slice(0, 67).replace(/\\s+$/, '') + '...' : name;
+  const title = name.length > 70 ? name.slice(0, 67).replace(/\s+$/, '') + '...' : name;
   const metaTitle = `${title} | Oferta ${category}`.slice(0, 60);
   const tags = [...new Set([
     category.toLowerCase(),
     'ofertas',
     'mercado livre',
-    ...name.toLowerCase().split(/\\s+/).filter(x => x.length >= 4).slice(0, 6),
+    ...name.toLowerCase().split(/\s+/).filter(x => x.length >= 4).slice(0, 6),
   ])].slice(0, 10);
   const benefits = benefitLines(p, category);
   const priceHtml = price ? `<p><strong>Preço informado: R$ ${price.toFixed(2).replace('.', ',')}</strong>${d ? ` · ${d}% de desconto` : ''}</p>` : '<p><strong>Preço: consultar no Mercado Livre.</strong></p>';
   const body_html = `<section><h2>${esc(name)}</h2><p>Descubra este produto selecionado pelo Orus para a categoria ${esc(category)}.</p>${priceHtml}<h3>Por que considerar</h3><ul>${benefits.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p>Consulte preço, disponibilidade, condições e especificações atualizadas diretamente no Mercado Livre.</p></section>`;
-  const instagram = `🔥 ${name}\\n\\n${benefits.slice(0, 3).map(x => '• ' + x).join('\\n')}\\n\\nQuer o link com desconto? Comente “EU QUERO” e receba no direct.\\n\\n#${tags.slice(0, 5).map(x => x.replace(/[^a-z0-9áéíóúãõç]/gi,'')).join(' #')}`;
+  const instagram = `🔥 ${name}\n\n${benefits.slice(0, 3).map(x => '• ' + x).join('\n')}\n\nQuer o link com desconto? Comente “EU QUERO” e receba no direct.\n\n#${tags.slice(0, 5).map(x => x.replace(/[^a-z0-9áéíóúãõç]/gi,'')).join(' #')}`;
   const pinterestTitle = `${name} | ${category} | Oferta e ideias`.slice(0, 100);
   const pinterestDescription = `Descubra ${name}, selecionado pelo Orus para ${category.toLowerCase()}. Veja informações, benefícios, preço quando disponível e acesso à oferta oficial. Pesquise, compare e confira a disponibilidade atual no Mercado Livre.`.slice(0, 500);
   const searchTerms = [
@@ -73,7 +73,7 @@ export function buildEcommerceStrategy(p: StrategyProduct) {
     `${name} promoção`,
     `${category} ideias e compras`,
   ].map(x => x.slice(0, 100));
-  const tiktokScript = `GANCHO: “Se você procura ${name}, olha esta opção.”\\nCENA 1: Mostre o produto e o contexto de uso.\\nCENA 2: Destaque apenas benefícios e especificações confirmados na ficha do produto.\\nCENA 3: Mostre preço/desconto somente se estiver atualizado.\\nCTA: “Comente EU QUERO para receber o link com desconto.”\\nOBS: Não inventar características, preço, estoque ou resultados.`;
+  const tiktokScript = `GANCHO: “Se você procura ${name}, olha esta opção.”\nCENA 1: Mostre o produto e o contexto de uso.\nCENA 2: Destaque apenas benefícios e especificações confirmados na ficha do produto.\nCENA 3: Mostre preço/desconto somente se estiver atualizado.\nCTA: “Comente EU QUERO para receber o link com desconto.”\nOBS: Não inventar características, preço, estoque ou resultados.`;
   const imagePrompt = `Publicidade e-commerce aesthetic, formato vertical 9:16, produto “${name}” como protagonista, colocado sobre superfície de pedra natural, iluminação suave de fim de tarde, composição limpa, luxo discreto, fotografia comercial realista, alta definição, profundidade de campo elegante, sem texto, sem logotipos adicionados, sem pessoas.`;
   return {
     title,
