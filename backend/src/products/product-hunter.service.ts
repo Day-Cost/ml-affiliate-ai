@@ -181,11 +181,13 @@ export class ProductHunterService {
     try { if (new URL(productUrl).hostname.toLowerCase() !== 'www.mercadolivre.com.br') return null; } catch { return null; }
 
     const winner = item?.buy_box_winner || {};
-    const price = Number(candidate?.price ?? winner?.price ?? 0);
-    if (!(price > 0)) return null;
+    const rawPrice = candidate?.price ?? winner?.price ?? null;
+    const price = rawPrice == null || rawPrice === '' ? null : Number(rawPrice);
+    if (price != null && !Number.isFinite(price)) return null;
 
-    const originalPrice = winner?.original_price == null ? null : Number(winner.original_price);
-    const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
+    const rawOriginalPrice = winner?.original_price ?? candidate?.original_price ?? null;
+    const originalPrice = rawOriginalPrice == null || rawOriginalPrice === '' ? null : Number(rawOriginalPrice);
+    const discount = originalPrice && price && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
     const rating = candidate?.reviews?.rating_average == null ? null : Number(candidate.reviews.rating_average);
     const reviewsCount = Number(candidate?.reviews?.total || 0);
     const quality = rating == null ? 50 : Math.min(100, rating * 20);
