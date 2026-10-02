@@ -107,7 +107,7 @@
     if (!token()) return;
     const key = 'orus_auto_discovery_v3_' + new Date().toISOString().slice(0, 10);
     if (localStorage.getItem(key)) return;
-    const queries = ['celular', 'notebook', 'smart tv', 'eletrodomésticos', 'casa e decoração', 'beleza', 'moda', 'acessórios', 'informática', 'games'];
+    const queries = ['peças automotivas mais vendidas', 'acessórios para carros mais vendidos', 'saúde e bem estar mais vendidos', 'casa e cozinha mais vendidos', 'alimentos e utensílios mais vendidos', 'air fryer mais vendidos', 'cafeteira mais vendidos', 'organizador para casa mais vendidos', 'acessórios automotivos', 'produtos fitness e bem estar'];
     let importedAny = false;
     for (const q of queries) {
       try {
