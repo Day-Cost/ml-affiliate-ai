@@ -56,13 +56,12 @@ export class ContentService {
     });
 
     return {
+      ...strategy,
       id: saved.id,
       status: saved.status,
-      title,
       caption,
       script,
       affiliateUrl,
-      ...strategy,
     };
   }
 
