@@ -174,11 +174,11 @@ export class ProductHunterService {
   private async saveCatalogFallback(userId: string, candidate: any) {
     const item = candidate?.item || {};
     const catalogId = String(candidate?.catalog_product_id || item?.catalog_product_id || candidate?.id || item?.id || '').trim().toUpperCase();
-    if (!/^MLB\\d+$/.test(catalogId)) return null;
+    if (!/^MLB[0-9]+$/.test(catalogId)) return null;
     if (String(item?.status || '').toLowerCase() === 'inactive') return null;
 
     const productUrl = String(candidate?.permalink || item?.permalink || `https://www.mercadolivre.com.br/p/${catalogId}`).trim();
-    if (!/^https:\\/\\/www\\.mercadolivre\\.com\\.br\\//i.test(productUrl)) return null;
+    try { if (new URL(productUrl).hostname.toLowerCase() !== 'www.mercadolivre.com.br') return null; } catch { return null; }
 
     const winner = item?.buy_box_winner || {};
     const price = Number(candidate?.price ?? winner?.price ?? 0);
