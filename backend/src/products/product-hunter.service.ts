@@ -193,8 +193,11 @@ export class ProductHunterService {
     const reviewsCount = Number(candidate?.reviews?.total || 0);
     const quality = rating == null ? 50 : Math.min(100, rating * 20);
     const pictures = Array.isArray(item?.pictures) ? item.pictures.length : (candidate?.thumbnail ? 1 : 0);
+    const soldQuantityRaw = candidate?.sold_quantity ?? winner?.sold_quantity ?? null;
+    const soldQuantity = soldQuantityRaw == null || soldQuantityRaw === '' ? null : Number(soldQuantityRaw);
+    const demand = soldQuantity != null && Number.isFinite(soldQuantity) ? Math.min(100, soldQuantity > 0 ? 35 + Math.log10(soldQuantity + 1) * 20 : 25) : 35;
     const content = Math.min(100, 55 + pictures * 5);
-    const score = this.scoring.calculate({ demand: 35, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
+    const score = this.scoring.calculate({ demand, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
 
     const externalProductId = `CATALOG-${catalogId}`;
     const product = await this.prisma.product.upsert({
@@ -211,7 +214,7 @@ export class ProductHunterService {
         currency: candidate?.currency_id || winner?.currency_id || 'BRL',
         rating,
         reviewsCount,
-        soldQuantity: null,
+        soldQuantity,
         sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
         imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
         productUrl,
@@ -234,7 +237,7 @@ export class ProductHunterService {
     });
 
     await this.prisma.productScore.create({
-      data: { productId: product.id, score, demand: 35, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content },
+      data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content },
     });
 
     return {
@@ -247,7 +250,7 @@ export class ProductHunterService {
       discountPercent: Number(discount.toFixed(2)),
       rating,
       reviewsCount,
-      soldQuantity: null,
+      soldQuantity,
       thumbnail: product.imageUrl,
       permalink: productUrl,
       affiliateUrl: product.affiliateUrl,
