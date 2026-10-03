@@ -281,7 +281,13 @@ export class ProductHunterService {
       // Product Hunter must expose only real Mercado Livre listings.
       // Catalog/PDP records are discovery candidates, not purchasable listings.
       // Resolve to an active MLB item before persisting or counting a result.
-      const resolved = await this.resolveRealItem(userId, p);
+      // Public listing search already returns complete marketplace listings.
+      // Do not discard a valid listing just because a follow-up /items/{id}
+      // request is blocked by Mercado Livre/Render with 403.
+      const directListing = this.isActiveRealListing(p?.item || p) ? (p?.item || p) : null;
+      const resolved = directListing
+        ? { itemId: String(directListing.id), detail: directListing, catalog: null }
+        : await this.resolveRealItem(userId, p);
       if (!resolved.detail) {
         this.logger.debug(`Skipping catalog candidate without a resolvable real listing id=${p?.id || p?.catalog_product_id || 'unknown'}`);
         return null;
