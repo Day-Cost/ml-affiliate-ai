@@ -278,14 +278,14 @@ export class ProductHunterService {
     }
 
     const items = (await Promise.all((data.results || []).map(async (p: any) => {
-      // Mercado Livre can return valid active catalog products even when the
-      // item-detail endpoint is temporarily unavailable (for example HTTP 403).
-      // Keep the real catalog PDP visible instead of dropping every result.
-      const catalogFallback = await this.saveCatalogFallback(userId, p);
-      if (catalogFallback) return catalogFallback;
-
+      // Product Hunter must expose only real Mercado Livre listings.
+      // Catalog/PDP records are discovery candidates, not purchasable listings.
+      // Resolve to an active MLB item before persisting or counting a result.
       const resolved = await this.resolveRealItem(userId, p);
-      if (!resolved.detail) return null;
+      if (!resolved.detail) {
+        this.logger.debug(`Skipping catalog candidate without a resolvable real listing id=${p?.id || p?.catalog_product_id || 'unknown'}`);
+        return null;
+      }
 
       const detail: any = resolved.detail;
       let catalog: any = resolved.catalog || {};
