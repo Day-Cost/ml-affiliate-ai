@@ -126,10 +126,6 @@ export class MercadoLivreService {
     }
   }
 
-  private async authenticatedPublicSearch(siteId: string, query: string, userId: string) {
-    return this.getWithToken(userId, `https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`, { q: query.trim(), limit: 20 });
-  }
-
   private async authenticatedCatalogSearch(siteId: string, query: string, userId: string) {
     return this.getWithToken(userId, 'https://api.mercadolibre.com/products/search', {
       status: 'active',
@@ -254,20 +250,9 @@ export class MercadoLivreService {
     const siteId = acc.siteId || 'MLB';
     const attempts: string[] = [];
 
-    // 1) Real marketplace listings through the authenticated item-search endpoint.
-    try {
-      const search = await this.authenticatedPublicSearch(siteId, query, userId);
-      const normalized = this.normalizeSearch(search);
-      console.log(`[MercadoLivre] authenticated listing search ok query="${query}" results=${normalized.results.length}`);
-      if (normalized.results.length) return normalized;
-      attempts.push('authenticated-listing-empty');
-    } catch (authError: any) {
-      const detail = this.logApiError(`authenticated listing search failed query="${query}"`, authError);
-      attempts.push(`authenticated-listing-${detail.status}`);
-      if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
-    }
-
-    // 2) Catalog search is a supported authenticated source. Product Hunter then
+    // 1) Catalog search is the supported authenticated discovery source for Product Hunter.
+    // Do not call /sites/{site}/search?q=... here: Mercado Livre documents that endpoint
+    // for seller/nickname listing searches, not generic third-party keyword discovery.
     // resolves each catalog result to an actual MLB listing/buy-box item.
     try {
       const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
@@ -280,7 +265,7 @@ export class MercadoLivreService {
       if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
     }
 
-    // 3) Public listing search remains a fallback only when it is not explicitly
+    // 2) Public listing search remains a fallback only when it is not explicitly
     // blocked by the API policy layer. A 403 is recorded once and not retried.
     try {
       const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
@@ -292,7 +277,7 @@ export class MercadoLivreService {
       attempts.push(`public-listing-${detail.status}`);
     }
 
-    // 4) Highlights are an official read source but require the corresponding
+    // 3) Highlights are an official read source but require the corresponding
     // functional permission. Use it only as the final discovery fallback.
     try {
       const bestSellers = await this.bestSellerSearch(siteId, query, userId);
