@@ -250,10 +250,20 @@ export class MercadoLivreService {
     const siteId = acc.siteId || 'MLB';
     const attempts: string[] = [];
 
-    // 1) Catalog search is the supported authenticated discovery source for Product Hunter.
-    // Do not call /sites/{site}/search?q=... here: Mercado Livre documents that endpoint
-    // for seller/nickname listing searches, not generic third-party keyword discovery.
-    // resolves each catalog result to an actual MLB listing/buy-box item.
+    // Generic keyword discovery must start with marketplace listing search.
+    // It returns real MLB publications instead of catalog PDP records.
+    try {
+      const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
+      console.log(`[MercadoLivre] public listing search query="${query}" results=${publicResults.results.length}`);
+      if (publicResults.results.length) return publicResults;
+      attempts.push('public-listing-empty');
+    } catch (publicError: any) {
+      const detail = this.logApiError(`public listing search failed query="${query}"`, publicError);
+      attempts.push(`public-listing-${detail.status}`);
+    }
+
+    // Catalog search is fallback discovery only; Product Hunter must resolve
+    // catalog candidates to real listings before persistence.
     try {
       const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
       console.log(`[MercadoLivre] authenticated catalog search fallback query="${query}" results=${catalog.results.length}`);
@@ -265,20 +275,6 @@ export class MercadoLivreService {
       if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
     }
 
-    // 2) Public listing search remains a fallback only when it is not explicitly
-    // blocked by the API policy layer. A 403 is recorded once and not retried.
-    try {
-      const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
-      console.log(`[MercadoLivre] public listing search fallback query="${query}" results=${publicResults.results.length}`);
-      if (publicResults.results.length) return publicResults;
-      attempts.push('public-listing-empty');
-    } catch (publicError: any) {
-      const detail = this.logApiError(`public listing search failed query="${query}"`, publicError);
-      attempts.push(`public-listing-${detail.status}`);
-    }
-
-    // 3) Highlights are an official read source but require the corresponding
-    // functional permission. Use it only as the final discovery fallback.
     try {
       const bestSellers = await this.bestSellerSearch(siteId, query, userId);
       if (bestSellers.results.length) return bestSellers;
