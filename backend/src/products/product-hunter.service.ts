@@ -72,6 +72,7 @@ export class ProductHunterService {
     if (/\/p\/|\/up\//i.test(url.pathname)) return false;
     if (status && status !== 'active') return false;
     if (subStatuses.some((s: string) => ['out_of_stock', 'deleted', 'inactive', 'closed'].includes(s))) return false;
+    if (detail?.available_quantity != null && Number(detail.available_quantity) <= 0) return false;
     return true;
   }
   private async resolveItemId(userId: string, itemId: string) {
