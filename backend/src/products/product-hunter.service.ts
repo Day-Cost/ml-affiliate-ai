@@ -34,6 +34,32 @@ export class ProductHunterService {
     })).data;
   }
 
+  private canonicalItemPermalink(itemId: string) {
+    const id = String(itemId || '').trim().toUpperCase();
+    if (!/^MLB\d+$/.test(id)) return null;
+    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
+  }
+
+  private listingProjection(ref: any, fallback: any = {}) {
+    const id = String(ref?.item_id || ref?.id || '').trim().toUpperCase();
+    if (!/^MLB\d+$/.test(id)) return null;
+    const permalink = String(ref?.permalink || fallback?.permalink || '').trim() || this.canonicalItemPermalink(id);
+    const detail = {
+      ...fallback, ...ref, id,
+      title: ref?.title || fallback?.title || fallback?.name || '',
+      price: ref?.price ?? fallback?.price ?? null,
+      original_price: ref?.original_price ?? fallback?.original_price ?? null,
+      currency_id: ref?.currency_id || fallback?.currency_id || 'BRL',
+      seller_id: ref?.seller_id ?? fallback?.seller_id ?? null,
+      available_quantity: ref?.available_quantity ?? fallback?.available_quantity ?? null,
+      sold_quantity: ref?.sold_quantity ?? fallback?.sold_quantity ?? null,
+      category_id: ref?.category_id || fallback?.category_id || null,
+      thumbnail: ref?.thumbnail || fallback?.thumbnail || fallback?.pictures?.[0]?.url || null,
+      permalink,
+    };
+    return this.isActiveRealListing(detail) ? detail : null;
+  }
+
   private isActiveRealListing(detail: any) {
     const id = String(detail?.id || '').trim().toUpperCase();
     const status = String(detail?.status || '').trim().toLowerCase();
@@ -80,9 +106,8 @@ export class ProductHunterService {
       // Some Mercado Livre catalog responses already contain the complete
       // marketplace publication. Use it when it is a valid real listing;
       // otherwise resolve the MLB through the item endpoint.
-      if (this.isActiveRealListing(directWinner)) {
-        return { itemId: String(directWinner.id), detail: directWinner, catalog: null };
-      }
+      const projectedWinner = this.listingProjection(directWinner);
+      if (projectedWinner) return { itemId: String(projectedWinner.id), detail: projectedWinner, catalog: null };
       const detail = await this.resolveItemId(userId, directWinnerId);
       if (detail) return { itemId: String(detail.id), detail, catalog: null };
     }
@@ -118,14 +143,10 @@ export class ProductHunterService {
       // /products/{product_id}/items. Use the first active real listing that has
       // a real item permalink instead of discarding the catalog product.
       const listingData = await this.mercadoLivre.getCatalogProductItems(userId, catalogId);
-      const listingIds = (listingData?.results || [])
-        .map((x: any) => String(x?.item_id || x?.id || '').trim())
-        .filter(Boolean);
-
-      for (const listingId of listingIds.slice(0, 10)) {
-        const detail = await this.resolveItemId(userId, listingId);
+      for (const x of (listingData?.results || []).slice(0, 10)) {
+        const detail = this.listingProjection(x, catalog);
         if (detail) {
-          this.logger.log(`Resolved catalog ${catalogId} to real item ${detail.id} through PDP items`);
+          this.logger.log(`Resolved catalog ${catalogId} to real item ${detail.id} through PDP items without /items lookup`);
           return { itemId: String(detail.id), detail, catalog };
         }
       }
@@ -143,19 +164,17 @@ export class ProductHunterService {
           if (child?.status !== 'active') continue;
           const childWinner = String(child?.buy_box_winner?.item_id || child?.buy_box_winner?.id || '').trim();
           if (childWinner) {
-            const detail = await this.resolveItemId(userId, childWinner);
+            const detail = this.listingProjection(child?.buy_box_winner, child);
             if (detail) {
-              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} to real item ${detail.id}`);
+              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} to real item ${detail.id} without /items lookup`);
               return { itemId: String(detail.id), detail, catalog: child };
             }
           }
           const childItems = await this.mercadoLivre.getCatalogProductItems(userId, String(childId));
           for (const x of (childItems?.results || []).slice(0, 10)) {
-            const listingId = String(x?.item_id || x?.id || '').trim();
-            if (!listingId) continue;
-            const detail = await this.resolveItemId(userId, listingId);
+            const detail = this.listingProjection(x, child);
             if (detail) {
-              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} through PDP items to real item ${detail.id}`);
+              this.logger.log(`Resolved parent catalog ${catalogId} child ${childId} through PDP items to real item ${detail.id} without /items lookup`);
               return { itemId: String(detail.id), detail, catalog: child };
             }
           }
