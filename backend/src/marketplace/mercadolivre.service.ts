@@ -250,8 +250,24 @@ export class MercadoLivreService {
     const siteId = acc.siteId || 'MLB';
     const attempts: string[] = [];
 
-    // Generic keyword discovery must start with marketplace listing search.
-    // It returns real MLB publications instead of catalog PDP records.
+    // Prefer the authenticated catalog API. The public /sites/{site}/search
+    // endpoint is subject to marketplace policies and can legitimately return
+    // 403 for an affiliate integration even when OAuth /users/me is valid.
+    // Product Hunter resolves catalog results to real MLB publications through
+    // buy_box_winner or /products/{product_id}/items, without GET /items/{id}.
+    try {
+      const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
+      console.log(`[MercadoLivre] authenticated catalog search query="${query}" results=${catalog.results.length}`);
+      if (catalog.results.length) return catalog;
+      attempts.push('authenticated-catalog-empty');
+    } catch (catalogError: any) {
+      const detail = this.logApiError(`authenticated catalog search failed query="${query}"`, catalogError);
+      attempts.push(`authenticated-catalog-${detail.status}`);
+      if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
+    }
+
+    // Public listing search is only a secondary discovery path. A 403 here
+    // must never prevent the authenticated catalog flow from working.
     try {
       const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
       console.log(`[MercadoLivre] public listing search query="${query}" results=${publicResults.results.length}`);
@@ -260,19 +276,6 @@ export class MercadoLivreService {
     } catch (publicError: any) {
       const detail = this.logApiError(`public listing search failed query="${query}"`, publicError);
       attempts.push(`public-listing-${detail.status}`);
-    }
-
-    // Catalog search is fallback discovery only; Product Hunter must resolve
-    // catalog candidates to real listings before persistence.
-    try {
-      const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
-      console.log(`[MercadoLivre] authenticated catalog search fallback query="${query}" results=${catalog.results.length}`);
-      if (catalog.results.length) return catalog;
-      attempts.push('authenticated-catalog-empty');
-    } catch (catalogError: any) {
-      const detail = this.logApiError(`authenticated catalog search failed query="${query}"`, catalogError);
-      attempts.push(`authenticated-catalog-${detail.status}`);
-      if (detail.status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
     }
 
     try {
