@@ -126,18 +126,19 @@ export class MercadoLivreService {
     }
   }
 
-  private async authenticatedCatalogSearch(siteId: string, query: string, userId: string) {
+  private async authenticatedCatalogSearch(siteId: string, query: string, userId: string, offset = 0, limit = 20) {
     return this.getWithToken(userId, 'https://api.mercadolibre.com/products/search', {
       status: 'active',
       site_id: siteId,
       q: query.trim(),
-      limit: 20,
+      offset,
+      limit,
     });
   }
 
-  private async publicSearch(siteId: string, query: string) {
+  private async publicSearch(siteId: string, query: string, offset = 0, limit = 50) {
     return (await axios.get(`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/search`, {
-      params: { q: query.trim(), limit: 20 },
+      params: { q: query.trim(), offset, limit },
       headers: { Accept: 'application/json', 'User-Agent': 'ML-Affiliate-AI/1.0' },
       timeout: 15000, httpsAgent: this.agent(), proxy: false,
     })).data;
@@ -244,7 +245,7 @@ export class MercadoLivreService {
     return { status, code, blockedBy, message };
   }
 
-  async searchCatalog(userId: string, query: string) {
+  async searchCatalog(userId: string, query: string, offset = 0, limit = 20) {
     const acc = await this.prisma.marketplaceAccount.findUnique({ where: { userId_marketplace: { userId, marketplace: 'MERCADOLIVRE' } } });
     if (!acc) throw new UnauthorizedException('MERCADO_LIVRE_NOT_CONNECTED');
     const siteId = acc.siteId || 'MLB';
@@ -256,7 +257,7 @@ export class MercadoLivreService {
     // Product Hunter resolves catalog results to real MLB publications through
     // buy_box_winner or /products/{product_id}/items, without GET /items/{id}.
     try {
-      const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId));
+      const catalog = this.normalizeSearch(await this.authenticatedCatalogSearch(siteId, query, userId, offset, limit));
       console.log(`[MercadoLivre] authenticated catalog search query="${query}" results=${catalog.results.length}`);
       if (catalog.results.length) return catalog;
       attempts.push('authenticated-catalog-empty');
@@ -269,7 +270,7 @@ export class MercadoLivreService {
     // Public listing search is only a secondary discovery path. A 403 here
     // must never prevent the authenticated catalog flow from working.
     try {
-      const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query));
+      const publicResults = this.normalizeSearch(await this.publicSearch(siteId, query, offset, Math.min(50, limit)));
       console.log(`[MercadoLivre] public listing search query="${query}" results=${publicResults.results.length}`);
       if (publicResults.results.length) return publicResults;
       attempts.push('public-listing-empty');
