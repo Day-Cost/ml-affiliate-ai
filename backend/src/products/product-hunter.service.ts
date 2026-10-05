@@ -187,13 +187,13 @@ export class ProductHunterService {
     }
   }
 
-  async search(query: string, userId?: string) {
+  async search(query: string, userId?: string, offset = 0, limit = 20) {
     if (!query.trim()) return { query, total: 0, items: [] };
     if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_USER_REQUIRED');
 
     let data: any;
     try {
-      data = await this.mercadoLivre.searchCatalog(userId, query);
+      data = await this.mercadoLivre.searchCatalog(userId, query, offset, limit);
     } catch (error: any) {
       const status = error?.response?.status;
       if (status === 401) throw new UnauthorizedException('MERCADO_LIVRE_TOKEN_INVALID_RECONNECT_REQUIRED');
@@ -321,13 +321,65 @@ export class ProductHunterService {
     }))).filter(Boolean);
 
     this.logger.log(`Product Hunter search query="${query}" catalogResults=${data.results?.length || 0} realListings=${items.length}`);
-    return { query, total: items.length, items };
+    return {
+      query,
+      total: items.length,
+      sourceCount: Array.isArray(data.results) ? data.results.length : 0,
+      sourceTotal: Number(data?.paging?.total || 0),
+      sourceOffset: Number(data?.paging?.offset || 0),
+      sourceLimit: Number(data?.paging?.limit || data?.results?.length || 20),
+      items,
+    };
   }
 
   async searchForConnectedUser(query: string) {
     const ready = await this.isReadyForAutomation();
     if (!ready.ready) throw new Error(ready.reason);
     return this.search(query, ready.userId);
+  }
+
+  async searchAllForConnectedUser(query: string, maxResults = 1000) {
+    const ready = await this.isReadyForAutomation();
+    if (!ready.ready) throw new Error(ready.reason);
+
+    const pageSize = Math.min(20, Math.max(1, Number(process.env.MLAI_HUNTER_PAGE_SIZE || 20)));
+    const hardCap = Math.max(pageSize, Math.min(10000, Number(maxResults) || 1000));
+    const all = new Map<string, any>();
+    let offset = 0;
+    let pages = 0;
+    let sourceTotal = 0;
+    let truncated = false;
+
+    while (offset < hardCap) {
+      const result = await this.search(query, ready.userId, offset, pageSize);
+      pages += 1;
+      sourceTotal = Number(result.sourceTotal || sourceTotal || 0);
+
+      for (const item of result.items || []) {
+        const key = String(item?.id || item?.externalProductId || '').trim().toUpperCase();
+        if (key) all.set(key, item);
+      }
+
+      const sourceCount = Number(result.sourceCount || 0);
+      const limit = Number(result.sourceLimit || pageSize);
+      const nextOffset = offset + Math.max(limit, pageSize);
+
+      if (!sourceCount || sourceCount < limit || (sourceTotal > 0 && nextOffset >= sourceTotal)) break;
+      offset = nextOffset;
+      if (offset >= hardCap) { truncated = true; break; }
+    }
+
+    this.logger.log(
+      `Product Hunter full discovery query="${query}" pages=${pages} sourceTotal=${sourceTotal} realListings=${all.size} truncated=${truncated}`,
+    );
+    return {
+      query,
+      total: all.size,
+      items: [...all.values()],
+      pages,
+      sourceTotal,
+      truncated,
+    };
   }
 
   async top(userId?: string) {
