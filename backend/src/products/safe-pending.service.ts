@@ -10,8 +10,14 @@ export class SafePendingService {
     const id = String(externalProductId || '').trim().toUpperCase();
     const source = String(fallback || '').trim();
     if (!/^MLB\d+$/.test(id)) return null;
-    if (!/^https:\/\/produto\.mercadolivre\.com\.br\/MLB-\d+/.test(source)) return null;
-    return source;
+    try {
+      const url = new URL(source);
+      if (!['produto.mercadolivre.com.br','www.mercadolivre.com.br'].includes(url.hostname.toLowerCase())) return null;
+      if (/\/p\/|\/up\//i.test(url.pathname)) return null;
+      return source;
+    } catch {
+      return null;
+    }
   }
 
   async list(userId: string) {
