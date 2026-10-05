@@ -24,17 +24,24 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
       .split(',')
       .map(x => x.trim())
       .filter(Boolean);
-    return configured.length ? configured : [
-      'peças automotivas mais vendidas',
-      'acessórios para carros mais vendidos',
-      'saúde e bem estar mais vendidos',
-      'casa e cozinha mais vendidos',
-      'alimentação e utensílios mais vendidos',
-      'air fryer mais vendidos',
-      'cafeteira mais vendidos',
-      'organização da casa mais vendidos',
-      'produtos fitness e bem estar mais vendidos',
-      'acessórios automotivos mais vendidos',
+    if (configured.length) return [...new Set(configured)];
+
+    // Automatic discovery families. The user does not need to type searches:
+    // every family is paginated by ProductHunter until the available results
+    // are consumed (or the configured safety cap is reached).
+    return [
+      'celular', 'smartphone', 'iphone', 'samsung galaxy', 'notebook', 'tablet',
+      'fone bluetooth', 'headset', 'smartwatch', 'televisão', 'monitor',
+      'câmera', 'acessórios para celular', 'carregador', 'power bank',
+      'air fryer', 'cafeteira', 'liquidificador', 'eletrodomésticos',
+      'cozinha', 'organização da casa', 'casa inteligente', 'ferramentas',
+      'beleza', 'cuidados pessoais', 'fitness', 'academia', 'saúde e bem estar',
+      'moda feminina', 'moda masculina', 'calçados', 'bolsas e acessórios',
+      'bebê e infantil', 'pet shop', 'jardinagem', 'games', 'videogame',
+      'informática', 'automotivo', 'peças automotivas', 'acessórios automotivos',
+      'ferramentas automotivas', 'rodas e pneus', 'som automotivo',
+      'casa e decoração', 'móveis', 'material escolar', 'papelaria',
+      'alimentação e utensílios', 'ofertas', 'mais vendidos',
     ];
   }
 
@@ -52,11 +59,12 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
 
       const queries = this.queries();
       let total = 0;
+      const maxResults = Math.max(20, Math.min(10000, Number(process.env.MLAI_HUNTER_MAX_RESULTS_PER_QUERY || 1000)));
       for (const query of queries) {
         try {
-          const result = await this.hunter.searchForConnectedUser(query);
+          const result = await this.hunter.searchAllForConnectedUser(query, maxResults);
           total += Number(result?.total || 0);
-          this.logger.log(`Automatic Product Hunter query="${query}" realListings=${result?.total || 0}`);
+          this.logger.log(`Automatic Product Hunter query="${query}" realListings=${result?.total || 0} pages=${result?.pages || 0} sourceTotal=${result?.sourceTotal || 0} truncated=${Boolean(result?.truncated)}`);
         } catch (error: any) {
           hadFailure = true;
           this.logger.warn(`Automatic Product Hunter query="${query}" failed: ${error?.message || 'unknown error'}`);
