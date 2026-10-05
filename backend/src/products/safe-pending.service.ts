@@ -44,11 +44,11 @@ export class SafePendingService {
       const permalink = String(product.productUrl || '').trim();
       // Only direct Mercado Livre item publications are eligible for the manual
       // affiliate queue. Catalog/PDP (/p/) and USER_PRODUCT records are rejected.
-      if (!/^MLB\\d+$/.test(externalId)) return null;
+      if (!/^MLB\d+$/.test(externalId)) return null;
       try {
         const url = new URL(permalink);
         if (!['produto.mercadolivre.com.br','www.mercadolivre.com.br'].includes(url.hostname.toLowerCase())) return null;
-        if (/\\/p\\/|\\/up\\//i.test(url.pathname)) return null;
+        if (/\/p\/|\/up\//i.test(url.pathname)) return null;
       } catch { return null; }
       const availability = product.price == null ? null : Number(product.price);
       if (availability != null && !Number.isFinite(availability)) return null;
