@@ -84,13 +84,10 @@
     if (!query || !box) return;
     box.innerHTML = '<p class="muted">Buscando produtos reais no Mercado Livre...</p>';
 
-    // Use the authenticated server-side Product Hunter first. This avoids
-    // mobile-browser CORS/JSONP failures and preserves the working OAuth path.
-    if (typeof previousSearch === 'function') {
-      try { return await previousSearch(); }
-      catch (backendError) { console.warn('[Orus] Backend Product Hunter failed; trying direct Mercado Livre search', backendError); }
-    }
-
+    // Prefer the browser's public Mercado Livre search for keyword discovery.
+    // This returns real MLB publications instead of catalog/PDP records. The
+    // Render-side API path remains a fallback because Mercado Livre can return
+    // 403 to server-side /sites/MLB/search calls.
     try {
       const raw = await browserSearch(query);
       const normalized = normalize(raw, query);
@@ -98,9 +95,15 @@
       void enrichInBackground(raw, normalized);
       return normalized;
     } catch (browserError) {
-      console.warn('[Orus] Direct Mercado Livre browser search also failed', browserError);
-      box.innerHTML = '<p class="error">Não foi possível concluir a busca agora.</p>';
+      console.warn('[Orus] Direct Mercado Livre browser search failed; falling back to backend Product Hunter', browserError);
     }
+
+    if (typeof previousSearch === 'function') {
+      try { return await previousSearch(); }
+      catch (backendError) { console.warn('[Orus] Backend Product Hunter also failed', backendError); }
+    }
+
+    box.innerHTML = '<p class="error">Não foi possível concluir a busca agora.</p>';
   };
 
   async function automaticDiscovery() {
