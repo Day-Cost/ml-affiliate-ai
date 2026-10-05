@@ -34,16 +34,11 @@ export class ProductHunterService {
     })).data;
   }
 
-  private canonicalItemPermalink(itemId: string) {
-    const id = String(itemId || '').trim().toUpperCase();
-    if (!/^MLB\d+$/.test(id)) return null;
-    return `https://produto.mercadolivre.com.br/MLB-${id.slice(3)}`;
-  }
-
   private listingProjection(ref: any, fallback: any = {}) {
     const id = String(ref?.item_id || ref?.id || '').trim().toUpperCase();
     if (!/^MLB\d+$/.test(id)) return null;
-    const permalink = String(ref?.permalink || fallback?.permalink || '').trim() || this.canonicalItemPermalink(id);
+    const permalink = String(ref?.permalink || fallback?.permalink || '').trim();
+    if (!permalink) return null;
     const detail = {
       ...fallback, ...ref, id,
       title: ref?.title || fallback?.title || fallback?.name || '',
@@ -190,96 +185,6 @@ export class ProductHunterService {
       this.logger.warn(`Could not resolve catalog product ${catalogId}: ${error?.response?.status || error?.message || 'unknown error'}`);
       return { itemId: null, detail: null, catalog: null };
     }
-  }
-
-  private async saveCatalogFallback(userId: string, candidate: any) {
-    const item = candidate?.item || {};
-    const catalogId = String(candidate?.catalog_product_id || item?.catalog_product_id || candidate?.id || item?.id || '').trim().toUpperCase();
-    if (!/^MLB[0-9]+$/.test(catalogId)) return null;
-    if (String(item?.status || '').toLowerCase() === 'inactive') return null;
-
-    const productUrl = String(candidate?.permalink || item?.permalink || `https://www.mercadolivre.com.br/p/${catalogId}`).trim();
-    try { if (new URL(productUrl).hostname.toLowerCase() !== 'www.mercadolivre.com.br') return null; } catch { return null; }
-
-    const winner = item?.buy_box_winner || {};
-    const rawPrice = candidate?.price ?? winner?.price ?? null;
-    const price = rawPrice == null || rawPrice === '' ? null : Number(rawPrice);
-    if (price != null && !Number.isFinite(price)) return null;
-
-    const rawOriginalPrice = winner?.original_price ?? candidate?.original_price ?? null;
-    const originalPrice = rawOriginalPrice == null || rawOriginalPrice === '' ? null : Number(rawOriginalPrice);
-    const discount = originalPrice && price && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
-    const rating = candidate?.reviews?.rating_average == null ? null : Number(candidate.reviews.rating_average);
-    const reviewsCount = Number(candidate?.reviews?.total || 0);
-    const quality = rating == null ? 50 : Math.min(100, rating * 20);
-    const pictures = Array.isArray(item?.pictures) ? item.pictures.length : (candidate?.thumbnail ? 1 : 0);
-    const soldQuantityRaw = candidate?.sold_quantity ?? winner?.sold_quantity ?? null;
-    const soldQuantity = soldQuantityRaw == null || soldQuantityRaw === '' ? null : Number(soldQuantityRaw);
-    const demand = soldQuantity != null && Number.isFinite(soldQuantity) ? Math.min(100, soldQuantity > 0 ? 35 + Math.log10(soldQuantity + 1) * 20 : 25) : 35;
-    const content = Math.min(100, 55 + pictures * 5);
-    const score = this.scoring.calculate({ demand, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
-
-    const externalProductId = `CATALOG-${catalogId}`;
-    const product = await this.prisma.product.upsert({
-      where: { marketplace_externalProductId: { marketplace: 'MERCADOLIVRE', externalProductId } },
-      create: {
-        id: `ml-catalog-${catalogId}`,
-        marketplace: 'MERCADOLIVRE',
-        externalProductId,
-        title: String(candidate?.title || item?.name || 'Produto Mercado Livre'),
-        categoryId: candidate?.category_id || item?.category_id || null,
-        price,
-        originalPrice,
-        discountPercent: discount,
-        currency: candidate?.currency_id || winner?.currency_id || 'BRL',
-        rating,
-        reviewsCount,
-        soldQuantity,
-        sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
-        imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
-        productUrl,
-        affiliateUrl: null,
-        availability: null,
-      },
-      update: {
-        title: String(candidate?.title || item?.name || 'Produto Mercado Livre'),
-        categoryId: candidate?.category_id || item?.category_id || null,
-        price,
-        originalPrice,
-        discountPercent: discount,
-        currency: candidate?.currency_id || winner?.currency_id || 'BRL',
-        rating,
-        reviewsCount,
-        soldQuantity,
-        sellerId: winner?.seller_id == null ? null : BigInt(winner.seller_id),
-        imageUrl: candidate?.thumbnail || item?.pictures?.[0]?.url || null,
-        productUrl,
-      },
-    });
-
-    await this.prisma.productScore.create({
-      data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content },
-    });
-
-    return {
-      id: product.id,
-      dbId: product.id,
-      externalProductId,
-      title: product.title,
-      price,
-      originalPrice,
-      discountPercent: Number(discount.toFixed(2)),
-      rating,
-      reviewsCount,
-      soldQuantity,
-      thumbnail: product.imageUrl,
-      permalink: productUrl,
-      affiliateUrl: product.affiliateUrl,
-      score,
-      affiliateStatus: 'PENDING',
-      dataQuality: { demand: 'CATALOG', conversion: 'NOT_AVAILABLE', commission: 'LINK_REQUIRED', trend: 'NOT_AVAILABLE', competition: 'ESTIMATE' },
-      sourceType: 'MERCADO_LIVRE_CATALOG',
-    };
   }
 
   async search(query: string, userId?: string) {
@@ -477,7 +382,7 @@ export class ProductHunterService {
   }
 
   async setAffiliateUrlByExternalId(externalProductId: string, affiliateUrl: string, userId?: string) {
-    const externalId = String(externalProductId || '').trim();
+    const externalId = String(externalProductId || '').trim().toUpperCase();
     if (!externalId) throw new NotFoundException('PRODUCT_NOT_FOUND');
     const product = await this.prisma.product.findFirst({
       where: { marketplace: 'MERCADOLIVRE', externalProductId: externalId },
