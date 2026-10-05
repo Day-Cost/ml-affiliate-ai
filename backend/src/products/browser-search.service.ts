@@ -33,9 +33,15 @@ export class BrowserSearchService {
       const productUrl = this.directItemUrl(id, p?.permalink);
       const price = Number(p?.price || 0);
 
-      // Only products with a real Mercado Livre item ID, direct listing URL,
-      // and usable price enter the affiliate-link queue.
+      // Only active, purchasable Mercado Livre item publications enter the
+      // affiliate-link queue. Catalog/PDP and USER_PRODUCT records are rejected.
+      const status = String(p?.status || '').trim().toLowerCase();
+      const subStatuses = Array.isArray(p?.sub_status) ? p.sub_status.map((s: any) => String(s).trim().toLowerCase()) : [];
+      const availableQuantity = p?.available_quantity == null ? null : Number(p.available_quantity);
       if (!productUrl || price <= 0) continue;
+      if (status && status !== 'active') continue;
+      if (subStatuses.some((s: string) => ['out_of_stock','deleted','inactive','closed'].includes(s))) continue;
+      if (availableQuantity != null && Number.isFinite(availableQuantity) && availableQuantity <= 0) continue;
 
       const originalPrice = p?.original_price == null ? null : Number(p.original_price);
       const discount = originalPrice && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
