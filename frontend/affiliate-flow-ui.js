@@ -15,8 +15,8 @@
     try {
       const externalId = String(product?.externalProductId || product?.id || '').trim();
       const dbId = String(product?.dbId || '').trim();
-      const path = externalId
-        ? API + '/products/by-item/' + encodeURIComponent(externalId) + '/affiliate-link'
+      const path = /^MLB\\d+$/i.test(externalId)
+        ? API + '/products/by-item/' + encodeURIComponent(externalId.toUpperCase()) + '/affiliate-link'
         : API + '/products/' + encodeURIComponent(dbId) + '/affiliate-link';
       const r = await fetch(path, {
         method: 'POST',
