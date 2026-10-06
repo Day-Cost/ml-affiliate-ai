@@ -175,7 +175,7 @@ export class MercadoLivreService {
         try {
           const url = new URL(permalink);
           if (!/(^|\\.)mercadolivre\\.com\\.br$/.test(url.hostname.toLowerCase())) return false;
-          if (/\\/p\\/|\\/up\\//i.test(url.pathname)) return false;
+          if (url.pathname.includes('/p/') || url.pathname.includes('/up/')) return false;
         } catch { return false; }
         if (listing?.available_quantity != null && Number(listing.available_quantity) <= 0) return false;
         return true;
