@@ -67,7 +67,16 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(`Automatic Product Hunter query="${query}" realListings=${result?.total || 0} pages=${result?.pages || 0} sourceTotal=${result?.sourceTotal || 0} truncated=${Boolean(result?.truncated)}`);
         } catch (error: any) {
           hadFailure = true;
-          this.logger.warn(`Automatic Product Hunter query="${query}" failed: ${error?.message || 'unknown error'}`);
+          const message = String(error?.message || 'unknown error');
+          this.logger.warn(`Automatic Product Hunter query="${query}" failed: ${message}`);
+          // A policy 403 is an external Mercado Livre permission/policy block.
+          // Stop this run immediately instead of hammering the API with every
+          // configured family. A later scheduled retry will resume after the
+          // external permission is fixed.
+          if (message === 'MERCADO_LIVRE_LISTING_SEARCH_FORBIDDEN_POLICY') {
+            this.logger.error('Automatic Product Hunter paused: Mercado Livre listing-search policy 403 requires external authorization/permission action.');
+            break;
+          }
         }
       }
       this.logger.log(`Automatic Product Hunter finished queries=${queries.length} realListings=${total} hadFailure=${hadFailure}`);
