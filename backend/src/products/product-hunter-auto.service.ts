@@ -10,7 +10,12 @@ export class ProductHunterAutoService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly hunter: ProductHunterService) {}
 
   onModuleInit() {
-    // Discovery is read-only and starts after the API is fully available.
+    // Direct affiliate-link import is the primary Orus ingestion mode.
+    // Automatic Mercado Livre discovery is opt-in to avoid API policy/403 loops.
+    if (String(process.env.MLAI_HUNTER_AUTO_ENABLED || 'false').toLowerCase() !== 'true') {
+      this.logger.log('Automatic Product Hunter disabled: affiliate-link import mode active.');
+      return;
+    }
     this.timer = setTimeout(() => this.run(), 30_000);
     this.timer.unref?.();
   }
