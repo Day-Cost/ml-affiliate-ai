@@ -433,6 +433,97 @@ export class ProductHunterService {
     return pending;
   }
 
+
+  private async extractItemIdFromAffiliateUrl(affiliateUrl: string) {
+    const url = String(affiliateUrl || '').trim();
+    let parsed: URL;
+    try { parsed = new URL(url); } catch { throw new Error('AFFILIATE_URL_INVALID'); }
+    const host = parsed.hostname.toLowerCase();
+    const allowed = ['meli.la','www.meli.la','mercadolivre.com.br','www.mercadolivre.com.br','mercadolivre.com','www.mercadolivre.com'];
+    if (!allowed.includes(host)) throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
+
+    const direct = url.match(/\bMLB\d+\b/i);
+    if (direct) return direct[0].toUpperCase();
+
+    try {
+      const response = await axios.get(url, {
+        maxRedirects: 8, timeout: 15000, responseType: 'text',
+        validateStatus: status => status >= 200 && status < 400,
+        headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Orus/1.0' },
+        proxy: false,
+      });
+      const finalUrl = String(response?.request?.res?.responseUrl || response?.request?._redirectable?._currentUrl || '');
+      for (const candidate of [finalUrl, String(response?.data || '')]) {
+        const match = candidate.match(/\bMLB\d+\b/i);
+        if (match) return match[0].toUpperCase();
+      }
+    } catch (error: any) {
+      this.logger.warn(`Affiliate URL resolution failed: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+    throw new Error('AFFILIATE_URL_ITEM_ID_NOT_FOUND');
+  }
+
+  async importAffiliateUrl(userId: string, affiliateUrl: string) {
+    const url = String(affiliateUrl || '').trim();
+    if (!userId) throw new UnauthorizedException('MERCADO_LIVRE_USER_REQUIRED');
+    if (!url) throw new Error('AFFILIATE_URL_REQUIRED');
+
+    const itemId = await this.extractItemIdFromAffiliateUrl(url);
+    let detail: any = null;
+    try { detail = await this.mercadoLivre.getItem(userId, itemId); } catch (error: any) {
+      this.logger.warn(`Authenticated affiliate product lookup failed item=${itemId}: ${error?.response?.status || error?.message || 'unknown'}`);
+    }
+    if (!detail) {
+      try { detail = await this.publicItem(itemId); } catch (error: any) {
+        this.logger.warn(`Public affiliate product lookup failed item=${itemId}: ${error?.response?.status || error?.message || 'unknown'}`);
+      }
+    }
+    if (!detail || !this.isActiveRealListing(detail)) throw new Error('AFFILIATE_PRODUCT_NOT_FOUND_OR_INACTIVE');
+
+    const price = detail.price == null ? null : Number(detail.price);
+    const originalPrice = detail.original_price == null ? null : Number(detail.original_price);
+    const discount = originalPrice && price && price > 0 ? Math.max(0, ((originalPrice - price) / originalPrice) * 100) : 0;
+    const rating = detail.reviews?.rating_average != null ? Number(detail.reviews.rating_average) : null;
+    const reviewsCount = Number(detail.reviews?.total || 0);
+    const soldQuantity = detail.sold_quantity == null ? null : Number(detail.sold_quantity);
+    const imageUrl = detail.thumbnail?.secure_url || detail.thumbnail || detail.pictures?.[0]?.secure_url || detail.pictures?.[0]?.url || null;
+    const demand = soldQuantity == null ? 35 : Math.min(100, soldQuantity > 0 ? 35 + Math.log10(soldQuantity + 1) * 20 : 25);
+    const quality = rating == null ? 50 : Math.min(100, rating * 20);
+    const content = Math.min(100, 55 + (Array.isArray(detail.pictures) ? detail.pictures.length : 0) * 5);
+    const score = this.scoring.calculate({ demand, conversion: 50, commission: 50, discount: Math.min(100, discount), quality, competition: 50, trend: 50, content });
+
+    const product = await this.prisma.product.upsert({
+      where: { id: `ml-${itemId}` },
+      create: {
+        id: `ml-${itemId}`, marketplace: 'MERCADOLIVRE', externalProductId: itemId,
+        title: String(detail.title || ''), categoryId: detail.category_id || null, categoryName: detail.domain_name || null,
+        price, originalPrice, discountPercent: discount, currency: detail.currency_id || 'BRL',
+        rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : null,
+        sellerName: detail.seller?.nickname || null, imageUrl, productUrl: String(detail.permalink || ''),
+        affiliateUrl: url, availability: detail.available_quantity != null ? String(detail.available_quantity) : null,
+      },
+      update: {
+        title: String(detail.title || ''), categoryId: detail.category_id || null, categoryName: detail.domain_name || null,
+        price, originalPrice, discountPercent: discount, currency: detail.currency_id || 'BRL',
+        rating, reviewsCount, soldQuantity, sellerId: detail.seller_id ? BigInt(detail.seller_id) : null,
+        sellerName: detail.seller?.nickname || null, imageUrl, productUrl: String(detail.permalink || ''),
+        affiliateUrl: url, availability: detail.available_quantity != null ? String(detail.available_quantity) : null,
+      },
+    });
+
+    await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content } });
+    await this.createMarketingQueue(userId, product);
+
+    return {
+      ok: true,
+      product: { id: product.id, externalProductId: itemId, title: product.title, price: product.price, originalPrice: product.originalPrice,
+        discountPercent: product.discountPercent, soldQuantity: product.soldQuantity, rating: product.rating, reviewsCount: product.reviewsCount,
+        imageUrl: product.imageUrl, productUrl: product.productUrl, affiliateUrl: product.affiliateUrl, score },
+      marketing: { status: 'QUEUED', channels: ['WEB','TIKTOK','INSTAGRAM','PINTEREST'] },
+      affiliate: { preservedExactly: true },
+    };
+  }
+
   async setAffiliateUrlByExternalId(externalProductId: string, affiliateUrl: string, userId?: string) {
     const externalId = String(externalProductId || '').trim().toUpperCase();
     if (!externalId) throw new NotFoundException('PRODUCT_NOT_FOUND');
@@ -445,7 +536,7 @@ export class ProductHunterService {
 
   async setAffiliateUrl(productId: string, affiliateUrl: string, userId?: string) {
     const url = String(affiliateUrl || '').trim();
-    if (!/^https:\/\/meli\.la\/[A-Za-z0-9]+$/i.test(url)) throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MELI_SHORT_LINK');
+    if (!/^https:\/\/(?:meli\.la|www\.meli\.la|mercadolivre\.com(?:\.br)?|www\.mercadolivre\.com(?:\.br)?)(?:\/|$)/i.test(url)) throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('PRODUCT_NOT_FOUND');
     const updated = await this.prisma.product.update({ where: { id: productId }, data: { affiliateUrl: url } });
