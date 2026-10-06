@@ -4,5 +4,5 @@ import { ContentService } from './content.service';
 import { PrismaService } from '../prisma.service';
 import { AuthService } from '../auth.service';
 
-@Module({ controllers: [ContentController], providers: [ContentService, PrismaService, AuthService] })
+@Module({ controllers: [ContentController], providers: [ContentService, PrismaService, AuthService], exports: [ContentService] })
 export class ContentModule {}
