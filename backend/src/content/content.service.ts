@@ -65,6 +65,52 @@ export class ContentService {
     };
   }
 
+
+  async autoPrepareForProduct(userId: string, productId: string) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product?.affiliateUrl) throw new ForbiddenException('AFFILIATE_LINK_REQUIRED');
+
+    const connected = await this.prisma.channelConnection.findMany({
+      where: { userId, status: { in: ['CONNECTED', 'ACTIVE', 'AUTHORIZED'] } },
+      select: { channel: true },
+    });
+    const channels = Array.from(new Set(['WEB', ...connected.map(c => String(c.channel || '').toUpperCase())]));
+    const created: any[] = [];
+
+    for (const channel of channels) {
+      const existing = await this.prisma.marketingContent.findFirst({
+        where: { userId, productId, channel, status: { in: ['DRAFT','READY_TO_PUBLISH','APPROVED','PUBLISHED'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) { created.push(existing); continue; }
+
+      const result = await this.generate(userId, {
+        productId,
+        channel,
+        contentType: channel === 'TIKTOK' ? 'VIDEO' : channel === 'INSTAGRAM' ? 'REEL' : 'POST',
+      });
+      const ready = await this.prisma.marketingContent.update({
+        where: { id: result.id },
+        data: {
+          status: channel === 'WEB' ? 'PUBLISHED' : 'READY_TO_PUBLISH',
+          approved: channel === 'WEB',
+          publishMode: channel === 'WEB' ? 'AUTO' : 'MANUAL',
+          publishedAt: channel === 'WEB' ? new Date() : undefined,
+        },
+      });
+      created.push(ready);
+    }
+
+    return {
+      ok: true,
+      productId,
+      channelsPrepared: channels,
+      contents: created,
+      paidActionExecuted: false,
+      note: 'Conteúdo gerado automaticamente. Canais sociais ficam READY_TO_PUBLISH até existir uma conexão/publicador oficial autorizado; nenhuma despesa é executada.',
+    };
+  }
+
   async approve(userId: string, id: string) {
     const item = await this.prisma.marketingContent.findFirst({ where: { id, userId } });
     if (!item) throw new NotFoundException('CONTENT_NOT_FOUND');
