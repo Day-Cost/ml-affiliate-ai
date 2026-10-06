@@ -10,7 +10,12 @@ export class PriceRepairService implements OnModuleInit {
   constructor(private prisma: PrismaService, private mercadoLivre: MercadoLivreService) {}
 
   async onModuleInit() {
-    // Do not block application startup. Repair legacy zero-price affiliate records shortly after boot.
+    // Disabled in affiliate-link import mode. Price changes are never required for ingestion
+    // and this legacy repair would create unnecessary Mercado Livre API traffic.
+    if (String(process.env.MLAI_PRICE_REPAIR_ENABLED || 'false').toLowerCase() !== 'true') {
+      this.logger.log('PriceRepairService disabled: affiliate-link import mode active.');
+      return;
+    }
     setTimeout(() => this.repairZeroPrices().catch((error: any) => {
       this.logger.warn(`Zero-price repair failed: ${error?.message || 'unknown error'}`);
     }), 1500);
