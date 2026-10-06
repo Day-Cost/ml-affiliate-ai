@@ -10,9 +10,10 @@ import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../crypto.service';
 import { AuthModule } from '../auth.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
+import { ContentModule } from '../content/content.module';
 
 @Module({
-  imports: [ScoringModule, AuthModule, MarketplaceModule],
+  imports: [ScoringModule, AuthModule, MarketplaceModule, ContentModule],
   controllers: [ProductsController],
   providers: [ProductHunterService, ProductHunterAutoService, BrowserSearchService, PriceRepairService, SafePendingService, PrismaService, CryptoService],
   exports: [ProductHunterService],
