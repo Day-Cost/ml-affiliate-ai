@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, UnauthorizedException, Logger } from '@n
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
+import { ContentService } from '../content/content.service';
 import { MercadoLivreService } from '../marketplace/mercadolivre.service';
 import { buildEcommerceStrategy } from '../content/content-strategy';
 
@@ -13,6 +14,7 @@ export class ProductHunterService {
     private prisma: PrismaService,
     private scoring: ScoringService,
     private mercadoLivre: MercadoLivreService,
+    private content: ContentService,
   ) {}
 
   async isReadyForAutomation() {
@@ -513,13 +515,14 @@ export class ProductHunterService {
 
     await this.prisma.productScore.create({ data: { productId: product.id, score, demand, conversion: 50, commission: 50, discount, quality, competition: 50, trend: 50, content } });
     await this.createMarketingQueue(userId, product);
+    const marketingExecution = await this.content.autoPrepareForProduct(userId, product.id);
 
     return {
       ok: true,
       product: { id: product.id, externalProductId: itemId, title: product.title, price: product.price, originalPrice: product.originalPrice,
         discountPercent: product.discountPercent, soldQuantity: product.soldQuantity, rating: product.rating, reviewsCount: product.reviewsCount,
         imageUrl: product.imageUrl, productUrl: product.productUrl, affiliateUrl: product.affiliateUrl, score },
-      marketing: { status: 'QUEUED', channels: ['WEB','TIKTOK','INSTAGRAM','PINTEREST'] },
+      marketing: marketingExecution,
       affiliate: { preservedExactly: true },
     };
   }
