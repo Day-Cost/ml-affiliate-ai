@@ -18,6 +18,12 @@ export class ProductsController {
 
   @Get('search')
   async search(@Req() req: Request, @Query('q') q: string) { const u = await this.currentUser(req); return this.hunter.search(q || '', u.id); }
+  @Post('import-affiliate-link')
+  async importAffiliateLink(@Req() req: Request, @Body() body: { affiliateUrl: string }) {
+    const u = await this.currentUser(req);
+    return this.hunter.importAffiliateUrl(u.id, body?.affiliateUrl);
+  }
+
   @Post('browser-search-import')
   async browserSearchImport(@Req() req: Request, @Body() body: { results: any[] }) {
     const u = await this.currentUser(req);
