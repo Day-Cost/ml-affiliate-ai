@@ -14,7 +14,7 @@ export class InstagramService {
     private config: ConfigService,
     private auth: AuthService,
   ) {
-    this.graphVersion = this.config.get<string>('META_GRAPH_API_VERSION') || 'v26.0';
+    this.graphVersion = this.config.get<string>('META_GRAPH_VERSION') || 'v26.0';
   }
 
   private appId() { return this.config.get<string>('META_APP_ID') || ''; }
