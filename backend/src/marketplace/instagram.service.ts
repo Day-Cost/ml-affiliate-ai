@@ -9,8 +9,8 @@ import { AuthService } from '../auth.service';
 export class InstagramService {
   private readonly scopes = 'instagram_business_basic,instagram_business_content_publish';
   constructor(private db: PrismaService, private cryptoService: CryptoService, private config: ConfigService, private auth: AuthService) {}
-  private clientId(){return this.config.get<string>('INSTAGRAM_CLIENT_ID')||this.config.get<string>('META_CLIENT_ID')||this.config.get<string>('META_APP_ID')||'';}
-  private clientSecret(){return this.config.get<string>('INSTAGRAM_CLIENT_SECRET')||this.config.get<string>('META_CLIENT_SECRET')||this.config.get<string>('META_APP_SECRET')||'';}
+  private clientId(){return this.config.get<string>('INSTAGRAM_CLIENT_ID')||this.config.get<string>('INSTAGRAM_APP_ID')||'';}
+  private clientSecret(){return this.config.get<string>('INSTAGRAM_CLIENT_SECRET')||this.config.get<string>('INSTAGRAM_APP_SECRET')||'';}
   private redirectUri(){return this.config.get<string>('INSTAGRAM_REDIRECT_URI')||`${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;}
   isConfigured(){return !!this.clientId()&&!!this.clientSecret();}
 
