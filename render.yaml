@@ -45,7 +45,7 @@ services:
       - key: META_APP_SECRET
         sync: false
       - key: META_GRAPH_VERSION
-        value: v26.0
+        value: v27.0
       - key: FACEBOOK_REDIRECT_URI
         sync: false
       - key: INSTAGRAM_CONFIG_ID
