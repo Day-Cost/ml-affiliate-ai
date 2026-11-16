@@ -19,10 +19,7 @@ services:
       - key: PORT
         value: "10000"
       - key: APP_URL
-        fromService:
-          type: web
-          name: ml-affiliate-ai
-          property: host
+        value: https://ml-affiliate-ai.onrender.com
       - key: ENCRYPTION_KEY
         generateValue: true
       - key: SESSION_SECRET

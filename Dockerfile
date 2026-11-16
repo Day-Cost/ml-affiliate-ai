@@ -16,4 +16,5 @@ COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/backend/prisma ./backend/prisma
 COPY --from=build /app/frontend ./frontend
 WORKDIR /app/backend
-CMD ["sh","-c","npx prisma db push --accept-data-loss && node dist/main.js"]
+# Never allow a container restart to discard production data.
+CMD ["sh","-c","npx prisma db push && node dist/main.js"]
