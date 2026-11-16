@@ -7,24 +7,159 @@ import { AuthService } from '../auth.service';
 
 @Injectable()
 export class InstagramService {
-  private readonly scopes = 'instagram_business_basic,instagram_business_content_publish';
-  constructor(private db: PrismaService, private cryptoService: CryptoService, private config: ConfigService, private auth: AuthService) {}
-  private clientId(){return this.config.get<string>('INSTAGRAM_CLIENT_ID')||this.config.get<string>('INSTAGRAM_APP_ID')||'';}
-  private clientSecret(){return this.config.get<string>('INSTAGRAM_CLIENT_SECRET')||this.config.get<string>('INSTAGRAM_APP_SECRET')||'';}
-  private redirectUri(){return this.config.get<string>('INSTAGRAM_REDIRECT_URI')||`${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;}
-  isConfigured(){return !!this.clientId()&&!!this.clientSecret();}
+  private readonly graphVersion: string;
+  constructor(
+    private db: PrismaService,
+    private cryptoService: CryptoService,
+    private config: ConfigService,
+    private auth: AuthService,
+  ) {
+    this.graphVersion = this.config.get<string>('META_GRAPH_API_VERSION') || 'v26.0';
+  }
 
-  async connectUrl(userId:string){if(!this.isConfigured())throw new Error('INSTAGRAM_APP_NOT_CONFIGURED');const state=crypto.randomBytes(24).toString('hex');await this.db.oAuthState.create({data:{state,codeVerifier:crypto.randomBytes(32).toString('base64url'),userId,expiresAt:new Date(Date.now()+10*60*1000)}});const url=new URL('https://www.instagram.com/oauth/authorize');url.searchParams.set('client_id',this.clientId());url.searchParams.set('redirect_uri',this.redirectUri());url.searchParams.set('response_type','code');url.searchParams.set('scope',this.scopes);url.searchParams.set('state',state);url.searchParams.set('enable_fb_login','0');url.searchParams.set('force_authentication','1');return{url:url.toString()};}
+  private appId() { return this.config.get<string>('META_APP_ID') || ''; }
+  private appSecret() { return this.config.get<string>('META_APP_SECRET') || ''; }
+  private configId() { return this.config.get<string>('INSTAGRAM_CONFIG_ID') || ''; }
+  private redirectUri() {
+    return this.config.get<string>('INSTAGRAM_REDIRECT_URI') ||
+      `${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;
+  }
+  private graphUrl(path: string) {
+    return `https://graph.facebook.com/${this.graphVersion}/${path.replace(/^\//, '')}`;
+  }
+  isConfigured() { return !!this.appId() && !!this.appSecret() && !!this.configId() && !!this.redirectUri(); }
 
-  async callback(code:string,state:string){const oauth=await this.db.oAuthState.findUnique({where:{state}});if(!oauth||oauth.expiresAt<new Date())throw new UnauthorizedException('INVALID_OAUTH_STATE');await this.db.oAuthState.delete({where:{id:oauth.id}});const body=new URLSearchParams({client_id:this.clientId(),client_secret:this.clientSecret(),grant_type:'authorization_code',redirect_uri:this.redirectUri(),code});const response=await fetch('https://api.instagram.com/oauth/access_token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});if(!response.ok)throw new Error(`INSTAGRAM_TOKEN_EXCHANGE_FAILED:${response.status}`);const shortToken:any=await response.json();if(!shortToken.access_token)throw new Error('INSTAGRAM_NO_ACCESS_TOKEN');
-    let accessToken=shortToken.access_token;let expiresAt=shortToken.expires_in?new Date(Date.now()+shortToken.expires_in*1000):null;
-    try{const u=new URL('https://graph.instagram.com/access_token');u.searchParams.set('grant_type','ig_exchange_token');u.searchParams.set('client_secret',this.clientSecret());u.searchParams.set('access_token',shortToken.access_token);const long=await fetch(u);if(long.ok){const d:any=await long.json();if(d.access_token){accessToken=d.access_token;expiresAt=d.expires_in?new Date(Date.now()+d.expires_in*1000):null;}}}catch{}
-    await this.db.channelConnection.upsert({where:{userId_channel:{userId:oauth.userId,channel:'INSTAGRAM'}},create:{userId:oauth.userId,channel:'INSTAGRAM',status:'CONNECTED',externalUserId:String(shortToken.user_id||''),accessTokenEnc:this.cryptoService.encrypt(accessToken),tokenExpiresAt:expiresAt,scopes:this.scopes},update:{status:'CONNECTED',externalUserId:String(shortToken.user_id||''),accessTokenEnc:this.cryptoService.encrypt(accessToken),tokenExpiresAt:expiresAt,scopes:this.scopes}});return{ok:true,expiresAt};}
+  async connectUrl(userId: string) {
+    if (!this.isConfigured()) throw new Error('INSTAGRAM_UNIFIED_LOGIN_NOT_CONFIGURED');
+    const state = crypto.randomBytes(24).toString('hex');
+    await this.db.oAuthState.create({
+      data: {
+        state,
+        codeVerifier: crypto.randomBytes(32).toString('base64url'),
+        userId,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
+    const url = new URL(this.graphUrl('dialog/oauth'));
+    url.searchParams.set('client_id', this.appId());
+    url.searchParams.set('config_id', this.configId());
+    url.searchParams.set('redirect_uri', this.redirectUri());
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', state);
+    return { url: url.toString() };
+  }
 
-  async status(userId:string){const c=await this.db.channelConnection.findUnique({where:{userId_channel:{userId,channel:'INSTAGRAM'}}});return{configured:this.isConfigured(),connected:!!c&&c.status==='CONNECTED',status:c?.status||'NOT_CONNECTED',scopes:c?.scopes||null,externalUserId:c?.externalUserId||null,tokenExpiresAt:c?.tokenExpiresAt||null};}
-  private async connection(userId:string){const c=await this.db.channelConnection.findUnique({where:{userId_channel:{userId,channel:'INSTAGRAM'}}});if(!c?.accessTokenEnc)throw new UnauthorizedException('INSTAGRAM_NOT_CONNECTED');return c;}
-  private async graph(userId:string,path:string,init:RequestInit={}){const c=await this.connection(userId);const token=this.cryptoService.decrypt(c.accessTokenEnc!);const url=new URL(`https://graph.instagram.com${path}`);url.searchParams.set('access_token',token);const response=await fetch(url,{...init,headers:{...(init.headers||{}),'Content-Type':'application/json'}});if(!response.ok)throw new Error(`INSTAGRAM_API_${response.status}:${await response.text()}`);return response.json();}
-  async me(userId:string){return this.graph(userId,'/me?fields=id,user_id,username,name,account_type');}
-  async createImagePost(userId:string,input:{imageUrl:string;caption?:string;shareToFeed?:boolean}){const c=await this.connection(userId);const token=this.cryptoService.decrypt(c.accessTokenEnc!);const userIdValue=c.externalUserId;if(!userIdValue)throw new Error('INSTAGRAM_USER_ID_MISSING');const createUrl=new URL(`https://graph.instagram.com/${userIdValue}/media`);createUrl.searchParams.set('access_token',token);const created=await fetch(createUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_url:input.imageUrl,caption:input.caption||''})});if(!created.ok)throw new Error(`INSTAGRAM_MEDIA_CREATE_${created.status}:${await created.text()}`);const container:any=await created.json();const publishUrl=new URL(`https://graph.instagram.com/${userIdValue}/media_publish`);publishUrl.searchParams.set('access_token',token);const published=await fetch(publishUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({creation_id:container.id})});if(!published.ok)throw new Error(`INSTAGRAM_MEDIA_PUBLISH_${published.status}:${await published.text()}`);return published.json();}
-  async currentUser(req:any){const h=req.headers.authorization||'';return this.auth.userFromToken(h.startsWith('Bearer ')?h.slice(7):undefined);}
+  private async graphRequest(path: string, accessToken: string) {
+    const url = new URL(this.graphUrl(path));
+    url.searchParams.set('access_token', accessToken);
+    const response = await fetch(url);
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error) {
+      throw new Error(`INSTAGRAM_GRAPH_API_ERROR:${payload?.error?.message || response.status}`);
+    }
+    return payload;
+  }
+
+  async callback(code: string, state: string) {
+    if (!code || !state) throw new UnauthorizedException('INSTAGRAM_OAUTH_CODE_OR_STATE_MISSING');
+    const oauth = await this.db.oAuthState.findUnique({ where: { state } });
+    if (!oauth || oauth.expiresAt < new Date()) throw new UnauthorizedException('INVALID_OAUTH_STATE');
+    await this.db.oAuthState.delete({ where: { id: oauth.id } });
+
+    const tokenUrl = new URL(this.graphUrl('oauth/access_token'));
+    tokenUrl.searchParams.set('client_id', this.appId());
+    tokenUrl.searchParams.set('client_secret', this.appSecret());
+    tokenUrl.searchParams.set('redirect_uri', this.redirectUri());
+    tokenUrl.searchParams.set('code', code);
+    const tokenResponse = await fetch(tokenUrl);
+    const tokenPayload: any = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !tokenPayload.access_token) {
+      throw new Error(`INSTAGRAM_TOKEN_EXCHANGE_FAILED:${tokenPayload?.error?.message || tokenResponse.status}`);
+    }
+
+    const accessToken = tokenPayload.access_token as string;
+    const expiresAt = tokenPayload.expires_in
+      ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
+      : null;
+
+    const assigned = await this.graphRequest('me/assigned_instagram_accounts?fields=id,username', accessToken);
+    const account = Array.isArray(assigned?.data) ? assigned.data[0] : null;
+    if (!account?.id) {
+      throw new Error('INSTAGRAM_ASSET_NOT_FOUND: confira se a conta profissional foi incluída na configuração e atribuída ao usuário do sistema.');
+    }
+
+    const scopes = 'instagram_basic,instagram_content_publish,instagram_manage_comments,instagram_manage_messages';
+    await this.db.channelConnection.upsert({
+      where: { userId_channel: { userId: oauth.userId, channel: 'INSTAGRAM' } },
+      create: {
+        userId: oauth.userId, channel: 'INSTAGRAM', status: 'CONNECTED',
+        externalUserId: String(account.id),
+        accessTokenEnc: this.cryptoService.encrypt(accessToken),
+        tokenExpiresAt: expiresAt, scopes,
+      },
+      update: {
+        status: 'CONNECTED', externalUserId: String(account.id),
+        accessTokenEnc: this.cryptoService.encrypt(accessToken),
+        tokenExpiresAt: expiresAt, scopes,
+      },
+    });
+    return { ok: true, instagramUsername: account.username || null, expiresAt };
+  }
+
+  async status(userId: string) {
+    const c = await this.db.channelConnection.findUnique({
+      where: { userId_channel: { userId, channel: 'INSTAGRAM' } },
+    });
+    return {
+      configured: this.isConfigured(), connected: !!c && c.status === 'CONNECTED',
+      status: c?.status || 'NOT_CONNECTED', scopes: c?.scopes || null,
+      externalUserId: c?.externalUserId || null, tokenExpiresAt: c?.tokenExpiresAt || null,
+    };
+  }
+
+  private async connection(userId: string) {
+    const c = await this.db.channelConnection.findUnique({
+      where: { userId_channel: { userId, channel: 'INSTAGRAM' } },
+    });
+    if (!c?.accessTokenEnc) throw new UnauthorizedException('INSTAGRAM_NOT_CONNECTED');
+    return c;
+  }
+
+  private async graph(userId: string, path: string, init: RequestInit = {}) {
+    const c = await this.connection(userId);
+    const token = this.cryptoService.decrypt(c.accessTokenEnc!);
+    const url = new URL(this.graphUrl(path));
+    url.searchParams.set('access_token', token);
+    const response = await fetch(url, {
+      ...init, headers: { ...(init.headers || {}), 'Content-Type': 'application/json' },
+    });
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error) {
+      throw new Error(`INSTAGRAM_API_${response.status}:${payload?.error?.message || JSON.stringify(payload)}`);
+    }
+    return payload;
+  }
+
+  async me(userId: string) {
+    const c = await this.connection(userId);
+    return this.graph(userId, `${c.externalUserId}?fields=id,username`);
+  }
+
+  async createImagePost(userId: string, input: { imageUrl: string; caption?: string; shareToFeed?: boolean }) {
+    const c = await this.connection(userId);
+    const accountId = c.externalUserId;
+    if (!accountId) throw new Error('INSTAGRAM_USER_ID_MISSING');
+    const container: any = await this.graph(userId, `${accountId}/media`, {
+      method: 'POST', body: JSON.stringify({ image_url: input.imageUrl, caption: input.caption || '' }),
+    });
+    if (!container?.id) throw new Error('INSTAGRAM_MEDIA_CONTAINER_NOT_CREATED');
+    return this.graph(userId, `${accountId}/media_publish`, {
+      method: 'POST', body: JSON.stringify({ creation_id: container.id }),
+    });
+  }
+
+  async currentUser(req: any) {
+    const h = req.headers.authorization || '';
+    return this.auth.userFromToken(h.startsWith('Bearer ') ? h.slice(7) : undefined);
+  }
 }
