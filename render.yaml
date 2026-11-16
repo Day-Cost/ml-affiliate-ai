@@ -44,15 +44,11 @@ services:
         sync: false
       - key: META_APP_SECRET
         sync: false
+      - key: META_GRAPH_VERSION
+        value: v26.0
       - key: FACEBOOK_REDIRECT_URI
         sync: false
-      - key: INSTAGRAM_CLIENT_ID
-        sync: false
-      - key: INSTAGRAM_CLIENT_SECRET
-        sync: false
-      - key: INSTAGRAM_APP_ID
-        sync: false
-      - key: INSTAGRAM_APP_SECRET
+      - key: INSTAGRAM_CONFIG_ID
         sync: false
       - key: INSTAGRAM_REDIRECT_URI
         sync: false
