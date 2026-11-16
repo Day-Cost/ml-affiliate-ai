@@ -35,7 +35,7 @@ export class InstagramService {
       `${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;
   }
   private graphUrl(path: string) {
-    return `https://graph.facebook.com/${this.graphVersion}/${path.replace(/^\\//, '')}`;
+    return `https://graph.facebook.com/${this.graphVersion}/${path.startsWith('/') ? path.slice(1) : path}`;
   }
   isConfigured() { return !!this.appId() && !!this.appSecret() && !!this.configId() && !!this.redirectUri(); }
 
