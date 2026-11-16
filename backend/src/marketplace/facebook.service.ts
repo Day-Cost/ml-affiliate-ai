@@ -12,8 +12,8 @@ export class FacebookService {
   private readonly scopes = 'pages_show_list,pages_read_engagement,pages_manage_posts';
   private readonly defaultGraphVersion = 'v26.0';
   constructor(private db: PrismaService, private cryptoService: CryptoService, private config: ConfigService, private auth: AuthService) {}
-  private clientId(){ return this.config.get<string>('FACEBOOK_CLIENT_ID') || this.config.get<string>('META_CLIENT_ID') || ''; }
-  private clientSecret(){ return this.config.get<string>('FACEBOOK_CLIENT_SECRET') || this.config.get<string>('META_CLIENT_SECRET') || ''; }
+  private clientId(){ return this.config.get<string>('FACEBOOK_CLIENT_ID') || this.config.get<string>('META_CLIENT_ID') || this.config.get<string>('META_APP_ID') || ''; }
+  private clientSecret(){ return this.config.get<string>('FACEBOOK_CLIENT_SECRET') || this.config.get<string>('META_CLIENT_SECRET') || this.config.get<string>('META_APP_SECRET') || ''; }
   private graphVersion(){ return this.config.get<string>('META_GRAPH_VERSION') || this.defaultGraphVersion; }
   private redirectUri(){ return this.config.get<string>('FACEBOOK_REDIRECT_URI') || `${this.config.get<string>('APP_URL')}/api/v1/marketplace/facebook/callback`; }
   isConfigured(){ return !!this.clientId() && !!this.clientSecret() && !!this.config.get<string>('APP_URL'); }
