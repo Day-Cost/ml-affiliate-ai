@@ -17,15 +17,25 @@ export class InstagramService {
     this.graphVersion = this.config.get<string>('META_GRAPH_VERSION') || 'v27.0';
   }
 
-  private appId() { return this.config.get<string>('META_APP_ID') || ''; }
-  private appSecret() { return this.config.get<string>('META_APP_SECRET') || ''; }
+  // Reuse the same Meta/Facebook app credential fallbacks as FacebookService.
+  // This keeps Instagram Unified Login compatible with existing ORUS deployments.
+  private appId() {
+    return this.config.get<string>('META_APP_ID') ||
+      this.config.get<string>('META_CLIENT_ID') ||
+      this.config.get<string>('FACEBOOK_CLIENT_ID') || '';
+  }
+  private appSecret() {
+    return this.config.get<string>('META_APP_SECRET') ||
+      this.config.get<string>('META_CLIENT_SECRET') ||
+      this.config.get<string>('FACEBOOK_CLIENT_SECRET') || '';
+  }
   private configId() { return this.config.get<string>('INSTAGRAM_CONFIG_ID') || ''; }
   private redirectUri() {
     return this.config.get<string>('INSTAGRAM_REDIRECT_URI') ||
       `${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;
   }
   private graphUrl(path: string) {
-    return `https://graph.facebook.com/${this.graphVersion}/${path.replace(/^\//, '')}`;
+    return `https://graph.facebook.com/${this.graphVersion}/${path.replace(/^\\//, '')}`;
   }
   isConfigured() { return !!this.appId() && !!this.appSecret() && !!this.configId() && !!this.redirectUri(); }
 
