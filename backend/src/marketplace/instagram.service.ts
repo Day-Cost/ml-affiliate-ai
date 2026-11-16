@@ -40,7 +40,7 @@ export class InstagramService {
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
     });
-    const url = new URL(this.graphUrl('dialog/oauth'));
+    const url = new URL(`https://www.facebook.com/${this.graphVersion}/dialog/oauth`);
     url.searchParams.set('client_id', this.appId());
     url.searchParams.set('config_id', this.configId());
     url.searchParams.set('redirect_uri', this.redirectUri());
