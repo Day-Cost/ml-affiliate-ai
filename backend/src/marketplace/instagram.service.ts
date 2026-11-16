@@ -14,7 +14,7 @@ export class InstagramService {
     private config: ConfigService,
     private auth: AuthService,
   ) {
-    this.graphVersion = this.config.get<string>('META_GRAPH_VERSION') || 'v26.0';
+    this.graphVersion = this.config.get<string>('META_GRAPH_VERSION') || 'v27.0';
   }
 
   private appId() { return this.config.get<string>('META_APP_ID') || ''; }
@@ -82,7 +82,7 @@ export class InstagramService {
       ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
       : null;
 
-    const assigned = await this.graphRequest('me/assigned_instagram_accounts?fields=id,username', accessToken);
+    const assigned = await this.graphRequest('me/assigned_instagram_accounts', accessToken);
     const account = Array.isArray(assigned?.data) ? assigned.data[0] : null;
     if (!account?.id) {
       throw new Error('INSTAGRAM_ASSET_NOT_FOUND: confira se a conta profissional foi incluída na configuração e atribuída ao usuário do sistema.');
