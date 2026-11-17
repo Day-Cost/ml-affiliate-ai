@@ -450,28 +450,18 @@ export class ProductHunterService {
       throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
     }
 
-    // Short affiliate links may redirect to product subdomains such as
-    // produto.mercadolivre.com.br. Accept official Mercado Livre subdomains,
-    // but never unrelated hosts or arbitrary MLB-like strings from page HTML.
     const itemIdFromUrl = (value: string, depth = 0): string | null => {
       try {
         const candidate = new URL(value);
         if (candidate.protocol !== 'https:' || !isOfficialHost(candidate.hostname)) return null;
-        // Product permalinks often include a human-readable slug before the
-        // MLB code (for example /produto-...-MLB-1234567890 or /p/MLB123...).
-        // Extract a complete MLB token from URL components, never arbitrary HTML.
-        const urlParts = [candidate.pathname, candidate.search, candidate.hash];
-        for (const part of urlParts) {
+        for (const part of [candidate.pathname, candidate.search, candidate.hash]) {
           let decoded = part;
           try { decoded = decodeURIComponent(part); } catch {}
           const match = decoded.match(/(?:^|[^A-Z0-9])(MLB-?\d{8,})(?=$|[^0-9])/i);
           if (match) return match[1].replace('-', '').toUpperCase();
         }
-
-        // Some tracking redirects wrap the final product URL in a named
-        // destination parameter rather than putting the item ID in the path.
-        if (depth < 2) {
-          for (const key of ['url', 'target', 'redirect', 'redirect_url', 'url_redirect', 'destination', 'dest', 'deep_link', 'link']) {
+        if (depth < 3) {
+          for (const key of ['url', 'target', 'redirect', 'redirect_url', 'url_redirect', 'destination', 'dest', 'deep_link', 'link', 'to', 'uri']) {
             const nested = candidate.searchParams.get(key);
             if (!nested) continue;
             const resolved = itemIdFromUrl(nested, depth + 1);
@@ -485,34 +475,115 @@ export class ProductHunterService {
     const direct = itemIdFromUrl(url);
     if (direct) return direct;
 
-    try {
-      const response = await axios.get(url, {
-        maxRedirects: 8, timeout: 15000, responseType: 'text',
-        validateStatus: status => status >= 200 && status < 400,
-        headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Mozilla/5.0 (compatible; Orus/1.0)' },
-        proxy: false,
-      });
-      const finalUrl = String(response?.request?.res?.responseUrl || response?.request?._redirectable?._currentUrl || '');
-      const fromFinalUrl = itemIdFromUrl(finalUrl);
-      if (fromFinalUrl) return fromFinalUrl;
+    const decodeHtml = (value: string) => value
+      .replace(/&amp;/gi, '&').replace(/&#38;/g, '&').replace(/&quot;/gi, '"')
+      .replace(/&#x2F;/gi, '/').replace(/\\u002[fF]/g, '/').replace(/\\\//g, '/');
 
-      // Only trust explicit canonical/product URL metadata, never arbitrary
-      // MLB-looking text elsewhere in the page source. Attribute order varies
-      // across Mercado Livre's templates, so inspect complete link/meta tags.
-      const html = String(response?.data || '');
-      const tags = html.match(/<(?:link|meta)\b[^>]*>/ig) || [];
+    const candidatesFromHtml = (htmlValue: string, baseUrl: string): string[] => {
+      const html = decodeHtml(String(htmlValue || ''));
+      const candidates: string[] = [];
+      const add = (raw: string) => {
+        const value = String(raw || '').trim().replace(/^['"]|['"]$/g, '');
+        if (!value) return;
+        try {
+          const resolved = new URL(value, baseUrl);
+          if (resolved.protocol === 'https:' && isOfficialHost(resolved.hostname)) candidates.push(resolved.toString());
+        } catch {}
+      };
+
+      const tags = html.match(/<(?:link|meta|a)\b[^>]*>/ig) || [];
       for (const tag of tags) {
-        const isCanonical = /<link\b/i.test(tag) && /rel=["']canonical["']/i.test(tag);
-        const isOgUrl = /<meta\b/i.test(tag) && /(?:property|name)=["']og:url["']/i.test(tag);
-        if (!isCanonical && !isOgUrl) continue;
-        const attr = isCanonical ? /href=["']([^"']+)["']/i : /content=["']([^"']+)["']/i;
-        const entry = tag.match(attr);
-        const resolved = entry ? itemIdFromUrl(String(entry[1] || '')) : null;
-        if (resolved) return resolved;
+        const isCanonical = /<link\b/i.test(tag) && /rel\s*=\s*["'][^"']*canonical/i.test(tag);
+        const isOgUrl = /<meta\b/i.test(tag) && /(?:property|name)\s*=\s*["']og:url["']/i.test(tag);
+        const isRefresh = /<meta\b/i.test(tag) && /http-equiv\s*=\s*["']refresh["']/i.test(tag);
+        const attrs = [...tag.matchAll(/(?:href|content|data-href|data-url)\s*=\s*["']([^"']+)["']/ig)];
+        if (isCanonical || isOgUrl || isRefresh || /<a\b/i.test(tag)) {
+          for (const attr of attrs) {
+            const raw = String(attr[1] || '');
+            if (isRefresh) {
+              const refresh = raw.match(/url\s*=\s*([^;]+)/i);
+              if (refresh) add(refresh[1]);
+            } else add(raw);
+          }
+        }
       }
-    } catch (error: any) {
-      this.logger.warn(`Affiliate URL resolution failed: ${error?.response?.status || error?.message || 'unknown'}`);
+
+      const refreshes = html.match(/(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/ig) || [];
+      for (const statement of refreshes) {
+        const match = statement.match(/=\s*["']([^"']+)["']/);
+        if (match) add(match[1]);
+      }
+      const jsonUrls = html.match(/https?:\\?\/\\?\/[^"'\\\s<>]+/ig) || [];
+      for (const raw of jsonUrls) add(raw.replace(/\\\//g, '/').replace(/\\u002[fF]/g, '/'));
+
+      return [...new Set(candidates)];
+    };
+
+    const tryResolve = async (startUrl: string): Promise<string | null> => {
+      let current = startUrl;
+      for (let hop = 0; hop < 9; hop++) {
+        let response: any;
+        try {
+          response = await axios.get(current, {
+            maxRedirects: 0, timeout: 12000, responseType: 'text',
+            validateStatus: status => status >= 200 && status < 400,
+            headers: {
+              Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
+            },
+            proxy: false,
+          });
+        } catch (error: any) {
+          this.logger.warn('Affiliate short-link request failed host=' + new URL(current).hostname + ' status=' + (error?.response?.status || 'network') + ' reason=' + (error?.code || error?.message || 'unknown'));
+          return null;
+        }
+
+        const location = response?.headers?.location;
+        if (response.status >= 300 && response.status < 400 && location) {
+          try {
+            const next = new URL(location, current);
+            if (next.protocol !== 'https:' || !isOfficialHost(next.hostname)) {
+              this.logger.warn('Affiliate short-link redirected to a non-official host: ' + next.hostname);
+              return null;
+            }
+            const found = itemIdFromUrl(next.toString());
+            if (found) return found;
+            current = next.toString();
+            continue;
+          } catch { return null; }
+        }
+
+        const finalUrl = String(response?.request?.res?.responseUrl || current);
+        const fromFinalUrl = itemIdFromUrl(finalUrl);
+        if (fromFinalUrl) return fromFinalUrl;
+
+        const html = String(response?.data || '');
+        for (const candidate of candidatesFromHtml(html, finalUrl)) {
+          const found = itemIdFromUrl(candidate);
+          if (found) return found;
+        }
+
+        const structuredId = html.match(/["'](?:item_id|itemId|product_id|productId|catalog_product_id)["']\s*:\s*["'](MLB-?\d{8,})["']/i);
+        if (structuredId) return structuredId[1].replace('-', '').toUpperCase();
+
+        const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '';
+        this.logger.warn('Affiliate short-link unresolved status=' + response.status + ' host=' + new URL(finalUrl).hostname + ' path=' + new URL(finalUrl).pathname.slice(0, 100) + ' htmlLength=' + html.length + ' title=' + title.replace(/\s+/g, ' ').slice(0, 100));
+        return null;
+      }
+      this.logger.warn('Affiliate short-link exceeded redirect limit.');
+      return null;
+    };
+
+    const resolved = await tryResolve(url);
+    if (resolved) return resolved;
+
+    if ((parsed.hostname === 'meli.la' || parsed.hostname === 'www.meli.la') && parsed.pathname.length > 1) {
+      const alias = 'https://www.mercadolivre.com/sec' + parsed.pathname + parsed.search;
+      const aliasResult = await tryResolve(alias);
+      if (aliasResult) return aliasResult;
     }
+
     throw new Error('AFFILIATE_URL_ITEM_ID_NOT_FOUND');
   }
 
