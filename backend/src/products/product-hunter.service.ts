@@ -457,9 +457,16 @@ export class ProductHunterService {
       try {
         const candidate = new URL(value);
         if (candidate.protocol !== 'https:' || !isOfficialHost(candidate.hostname)) return null;
-        const match = candidate.pathname.match(/(?:^|\/)(MLB-?\d{8,})(?:[/?#._-]|$)/i)
-          || candidate.search.match(/(?:^|[?&=_-])(MLB-?\d{8,})(?:[&#._-]|$)/i);
-        if (match) return match[1].replace('-', '').toUpperCase();
+        // Product permalinks often include a human-readable slug before the
+        // MLB code (for example /produto-...-MLB-1234567890 or /p/MLB123...).
+        // Extract a complete MLB token from URL components, never arbitrary HTML.
+        const urlParts = [candidate.pathname, candidate.search, candidate.hash];
+        for (const part of urlParts) {
+          let decoded = part;
+          try { decoded = decodeURIComponent(part); } catch {}
+          const match = decoded.match(/(?:^|[^A-Z0-9])(MLB-?\\d{8,})(?=$|[^0-9])/i);
+          if (match) return match[1].replace('-', '').toUpperCase();
+        }
 
         // Some tracking redirects wrap the final product URL in a named
         // destination parameter rather than putting the item ID in the path.
