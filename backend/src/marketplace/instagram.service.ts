@@ -32,10 +32,10 @@ export class InstagramService {
   private configId() { return this.config.get<string>('INSTAGRAM_CONFIG_ID') || ''; }
   private redirectUri() {
     return this.config.get<string>('INSTAGRAM_REDIRECT_URI') ||
-      `${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback`;
+      \`\${this.config.get<string>('APP_URL')}/api/v1/marketplace/instagram/callback\`;
   }
   private graphUrl(path: string) {
-    return `https://graph.facebook.com/${this.graphVersion}/${path.startsWith('/') ? path.slice(1) : path}`;
+    return \`https://graph.facebook.com/\${this.graphVersion}/\${path.startsWith('/') ? path.slice(1) : path}\`;
   }
   isConfigured() { return !!this.appId() && !!this.appSecret() && !!this.configId() && !!this.redirectUri(); }
 
@@ -50,7 +50,7 @@ export class InstagramService {
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       },
     });
-    const url = new URL(`https://www.facebook.com/${this.graphVersion}/dialog/oauth`);
+    const url = new URL(\`https://www.facebook.com/\${this.graphVersion}/dialog/oauth\`);
     url.searchParams.set('client_id', this.appId());
     url.searchParams.set('config_id', this.configId());
     url.searchParams.set('redirect_uri', this.redirectUri());
@@ -65,7 +65,7 @@ export class InstagramService {
     const response = await fetch(url);
     const payload: any = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {
-      throw new Error(`INSTAGRAM_GRAPH_API_ERROR:${payload?.error?.message || response.status}`);
+      throw new Error(\`INSTAGRAM_GRAPH_API_ERROR:\${payload?.error?.message || response.status}\`);
     }
     return payload;
   }
@@ -84,7 +84,7 @@ export class InstagramService {
     const tokenResponse = await fetch(tokenUrl);
     const tokenPayload: any = await tokenResponse.json().catch(() => ({}));
     if (!tokenResponse.ok || !tokenPayload.access_token) {
-      throw new Error(`INSTAGRAM_TOKEN_EXCHANGE_FAILED:${tokenPayload?.error?.message || tokenResponse.status}`);
+      throw new Error(\`INSTAGRAM_TOKEN_EXCHANGE_FAILED:\${tokenPayload?.error?.message || tokenResponse.status}\`);
     }
 
     const accessToken = tokenPayload.access_token as string;
@@ -120,10 +120,40 @@ export class InstagramService {
     const c = await this.db.channelConnection.findUnique({
       where: { userId_channel: { userId, channel: 'INSTAGRAM' } },
     });
+
+    // Read the actual Meta-granted permissions. The stored scopes string is
+    // historical metadata and is not proof that Meta granted each permission.
+    let permissions: Array<{ permission: string; status: string }> | null = null;
+    let permissionsError: string | null = null;
+    if (c?.status === 'CONNECTED' && c.accessTokenEnc) {
+      try {
+        const token = this.cryptoService.decrypt(c.accessTokenEnc);
+        const result = await this.graphRequest('me/permissions', token);
+        permissions = Array.isArray(result?.data)
+          ? result.data.map((item: any) => ({
+              permission: String(item?.permission || ''),
+              status: String(item?.status || ''),
+            })).filter((item: any) => item.permission)
+          : [];
+      } catch {
+        permissionsError = 'INSTAGRAM_PERMISSIONS_CHECK_FAILED';
+      }
+    }
+    const publishPermission = permissions?.find(
+      item => item.permission === 'instagram_content_publish',
+    )?.status || 'missing';
+
     return {
-      configured: this.isConfigured(), connected: !!c && c.status === 'CONNECTED',
-      status: c?.status || 'NOT_CONNECTED', scopes: c?.scopes || null,
-      externalUserId: c?.externalUserId || null, tokenExpiresAt: c?.tokenExpiresAt || null,
+      configured: this.isConfigured(),
+      connected: !!c && c.status === 'CONNECTED',
+      status: c?.status || 'NOT_CONNECTED',
+      scopes: c?.scopes || null,
+      externalUserId: c?.externalUserId || null,
+      tokenExpiresAt: c?.tokenExpiresAt || null,
+      permissions,
+      permissionsError,
+      publishPermission,
+      publishReady: publishPermission === 'granted',
     };
   }
 
@@ -145,25 +175,25 @@ export class InstagramService {
     });
     const payload: any = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {
-      throw new Error(`INSTAGRAM_API_${response.status}:${payload?.error?.message || JSON.stringify(payload)}`);
+      throw new Error(\`INSTAGRAM_API_\${response.status}:\${payload?.error?.message || JSON.stringify(payload)}\`);
     }
     return payload;
   }
 
   async me(userId: string) {
     const c = await this.connection(userId);
-    return this.graph(userId, `${c.externalUserId}?fields=id,username`);
+    return this.graph(userId, \`\${c.externalUserId}?fields=id,username\`);
   }
 
   async createImagePost(userId: string, input: { imageUrl: string; caption?: string; shareToFeed?: boolean }) {
     const c = await this.connection(userId);
     const accountId = c.externalUserId;
     if (!accountId) throw new Error('INSTAGRAM_USER_ID_MISSING');
-    const container: any = await this.graph(userId, `${accountId}/media`, {
+    const container: any = await this.graph(userId, \`\${accountId}/media\`, {
       method: 'POST', body: JSON.stringify({ image_url: input.imageUrl, caption: input.caption || '' }),
     });
     if (!container?.id) throw new Error('INSTAGRAM_MEDIA_CONTAINER_NOT_CREATED');
-    return this.graph(userId, `${accountId}/media_publish`, {
+    return this.graph(userId, \`\${accountId}/media_publish\`, {
       method: 'POST', body: JSON.stringify({ creation_id: container.id }),
     });
   }
