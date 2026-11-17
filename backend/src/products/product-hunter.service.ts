@@ -464,7 +464,7 @@ export class ProductHunterService {
         for (const part of urlParts) {
           let decoded = part;
           try { decoded = decodeURIComponent(part); } catch {}
-          const match = decoded.match(/(?:^|[^A-Z0-9])(MLB-?\\d{8,})(?=$|[^0-9])/i);
+          const match = decoded.match(/(?:^|[^A-Z0-9])(MLB-?\d{8,})(?=$|[^0-9])/i);
           if (match) return match[1].replace('-', '').toUpperCase();
         }
 
