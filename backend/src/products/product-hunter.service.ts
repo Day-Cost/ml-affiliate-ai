@@ -440,24 +440,48 @@ export class ProductHunterService {
     const url = String(affiliateUrl || '').trim();
     let parsed: URL;
     try { parsed = new URL(url); } catch { throw new Error('AFFILIATE_URL_INVALID'); }
-    const host = parsed.hostname.toLowerCase();
-    const allowed = ['meli.la','www.meli.la','mercadolivre.com.br','www.mercadolivre.com.br','mercadolivre.com','www.mercadolivre.com'];
-    if (!allowed.includes(host)) throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
+    const allowed = new Set(['meli.la', 'www.meli.la', 'mercadolivre.com.br', 'www.mercadolivre.com.br', 'mercadolivre.com', 'www.mercadolivre.com']);
+    if (parsed.protocol !== 'https:' || !allowed.has(parsed.hostname.toLowerCase())) {
+      throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
+    }
 
-    const direct = url.match(/\bMLB\d+\b/i);
-    if (direct) return direct[0].toUpperCase();
+    // Mercado Livre item IDs are long numeric identifiers. Do not scan the
+    // entire HTML document: scripts, tracking pixels and unrelated assets can
+    // contain short strings such as "MLB1196" that are not listing IDs.
+    const itemIdFromUrl = (value: string) => {
+      try {
+        const candidate = new URL(value);
+        if (!allowed.has(candidate.hostname.toLowerCase())) return null;
+        const match = candidate.pathname.match(/(?:^|\/)(MLB-?\d{8,})(?:[/?#._-]|$)/i)
+          || candidate.search.match(/(?:^|[?&=_-])(MLB-?\d{8,})(?:[&#._-]|$)/i);
+        return match ? match[1].replace('-', '').toUpperCase() : null;
+      } catch { return null; }
+    };
+
+    const direct = itemIdFromUrl(url);
+    if (direct) return direct;
 
     try {
       const response = await axios.get(url, {
         maxRedirects: 8, timeout: 15000, responseType: 'text',
         validateStatus: status => status >= 200 && status < 400,
-        headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Orus/1.0' },
+        headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Mozilla/5.0 (compatible; Orus/1.0)' },
         proxy: false,
       });
       const finalUrl = String(response?.request?.res?.responseUrl || response?.request?._redirectable?._currentUrl || '');
-      for (const candidate of [finalUrl, String(response?.data || '')]) {
-        const match = candidate.match(/\bMLB\d+\b/i);
-        if (match) return match[0].toUpperCase();
+      const fromFinalUrl = itemIdFromUrl(finalUrl);
+      if (fromFinalUrl) return fromFinalUrl;
+
+      // Only trust explicit canonical/product URL metadata, never arbitrary
+      // MLB-looking text elsewhere in the page source.
+      const html = String(response?.data || '');
+      const metadata = [
+        ...html.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/ig),
+        ...html.matchAll(/<meta[^>]+(?:property|name)=["']og:url["'][^>]+content=["']([^"']+)["']/ig),
+      ];
+      for (const entry of metadata) {
+        const resolved = itemIdFromUrl(String(entry[1] || ''));
+        if (resolved) return resolved;
       }
     } catch (error: any) {
       this.logger.warn(`Affiliate URL resolution failed: ${error?.response?.status || error?.message || 'unknown'}`);
