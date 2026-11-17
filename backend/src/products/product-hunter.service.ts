@@ -440,21 +440,38 @@ export class ProductHunterService {
     const url = String(affiliateUrl || '').trim();
     let parsed: URL;
     try { parsed = new URL(url); } catch { throw new Error('AFFILIATE_URL_INVALID'); }
-    const allowed = new Set(['meli.la', 'www.meli.la', 'mercadolivre.com.br', 'www.mercadolivre.com.br', 'mercadolivre.com', 'www.mercadolivre.com']);
-    if (parsed.protocol !== 'https:' || !allowed.has(parsed.hostname.toLowerCase())) {
+    const isOfficialHost = (hostname: string) => {
+      const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+      return host === 'meli.la' || host === 'www.meli.la'
+        || host === 'mercadolivre.com.br' || host.endsWith('.mercadolivre.com.br')
+        || host === 'mercadolivre.com' || host.endsWith('.mercadolivre.com');
+    };
+    if (parsed.protocol !== 'https:' || !isOfficialHost(parsed.hostname)) {
       throw new Error('AFFILIATE_URL_MUST_BE_OFFICIAL_MERCADOLIVRE');
     }
 
-    // Mercado Livre item IDs are long numeric identifiers. Do not scan the
-    // entire HTML document: scripts, tracking pixels and unrelated assets can
-    // contain short strings such as "MLB1196" that are not listing IDs.
-    const itemIdFromUrl = (value: string) => {
+    // Short affiliate links may redirect to product subdomains such as
+    // produto.mercadolivre.com.br. Accept official Mercado Livre subdomains,
+    // but never unrelated hosts or arbitrary MLB-like strings from page HTML.
+    const itemIdFromUrl = (value: string, depth = 0): string | null => {
       try {
         const candidate = new URL(value);
-        if (!allowed.has(candidate.hostname.toLowerCase())) return null;
+        if (candidate.protocol !== 'https:' || !isOfficialHost(candidate.hostname)) return null;
         const match = candidate.pathname.match(/(?:^|\/)(MLB-?\d{8,})(?:[/?#._-]|$)/i)
           || candidate.search.match(/(?:^|[?&=_-])(MLB-?\d{8,})(?:[&#._-]|$)/i);
-        return match ? match[1].replace('-', '').toUpperCase() : null;
+        if (match) return match[1].replace('-', '').toUpperCase();
+
+        // Some tracking redirects wrap the final product URL in a named
+        // destination parameter rather than putting the item ID in the path.
+        if (depth < 2) {
+          for (const key of ['url', 'target', 'redirect', 'redirect_url', 'url_redirect', 'destination', 'dest', 'deep_link', 'link']) {
+            const nested = candidate.searchParams.get(key);
+            if (!nested) continue;
+            const resolved = itemIdFromUrl(nested, depth + 1);
+            if (resolved) return resolved;
+          }
+        }
+        return null;
       } catch { return null; }
     };
 
@@ -473,14 +490,17 @@ export class ProductHunterService {
       if (fromFinalUrl) return fromFinalUrl;
 
       // Only trust explicit canonical/product URL metadata, never arbitrary
-      // MLB-looking text elsewhere in the page source.
+      // MLB-looking text elsewhere in the page source. Attribute order varies
+      // across Mercado Livre's templates, so inspect complete link/meta tags.
       const html = String(response?.data || '');
-      const metadata = [
-        ...html.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/ig),
-        ...html.matchAll(/<meta[^>]+(?:property|name)=["']og:url["'][^>]+content=["']([^"']+)["']/ig),
-      ];
-      for (const entry of metadata) {
-        const resolved = itemIdFromUrl(String(entry[1] || ''));
+      const tags = html.match(/<(?:link|meta)\b[^>]*>/ig) || [];
+      for (const tag of tags) {
+        const isCanonical = /<link\b/i.test(tag) && /rel=["']canonical["']/i.test(tag);
+        const isOgUrl = /<meta\b/i.test(tag) && /(?:property|name)=["']og:url["']/i.test(tag);
+        if (!isCanonical && !isOgUrl) continue;
+        const attr = isCanonical ? /href=["']([^"']+)["']/i : /content=["']([^"']+)["']/i;
+        const entry = tag.match(attr);
+        const resolved = entry ? itemIdFromUrl(String(entry[1] || '')) : null;
         if (resolved) return resolved;
       }
     } catch (error: any) {
