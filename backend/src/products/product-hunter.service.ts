@@ -23,8 +23,10 @@ export class ProductHunterService {
       orderBy: { updatedAt: 'desc' },
     });
     if (!acc) return { ready: false, reason: 'MERCADO_LIVRE_NOT_CONNECTED' };
-    const scope = String(acc.scope || '').split(/\s+/).filter(Boolean);
-    if (!scope.includes('read')) return { ready: false, reason: 'MERCADO_LIVRE_READ_SCOPE_REQUIRED' };
+    // Mercado Livre may return granular URN scopes (for example
+    // urn:ml:...:/read-only) instead of the legacy standalone `read` scope.
+    // Do not reject a connected account merely because `read` is absent;
+    // the authenticated API request below is the source of truth for access.
     return { ready: true, userId: acc.userId };
   }
 
